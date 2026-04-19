@@ -146,15 +146,15 @@ test "Short" {
     try writer.flush();
 
     const bytes = [_]u8{
-        0b00000000,0b00000000,
-        0b00000000,0b00000001,
-        0b00000000,0b00000010,
-        0b00000000,0b01111111,
-        0b00000000,0b10000000,
-        0b00000000,0b11111111,
-        0b01111111,0b11111111,
-        0b11111111,0b11111111,
-        0b10000000,0b00000000,
+        0b00000000, 0b00000000,
+        0b00000000, 0b00000001,
+        0b00000000, 0b00000010,
+        0b00000000, 0b01111111,
+        0b00000000, 0b10000000,
+        0b00000000, 0b11111111,
+        0b01111111, 0b11111111,
+        0b11111111, 0b11111111,
+        0b10000000, 0b00000000,
     };
     for (bytes, 0..) |b, i| {
         print("Encoded byte: {b:0>8}, Expected: {b:0>8}\n", .{ buf[i], b });
@@ -163,6 +163,61 @@ test "Short" {
 
     for (values) |v| {
         const read_value = try readShort(&reader);
+        print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
+        try std.testing.expect(read_value == v);
+    }
+}
+
+pub fn readLong(reader: *std.io.Reader) !i64 {
+    const bytes = try reader.take(8);
+    const long: i64 = @as(i64, bytes[0]) << 56 | @as(i64, bytes[1]) << 48 | @as(i64, bytes[2]) << 40 | @as(i64, bytes[3]) << 32 | @as(i64, bytes[4]) << 24 | @as(i64, bytes[5]) << 16 | @as(i64, bytes[6]) << 8 | @as(i64, bytes[7]);
+    return long;
+}
+
+pub fn writeLong(writer: *std.io.Writer, long: i64) !void {
+    const bytes: [8]u8 = .{
+        @intCast((long >> 56) & 0xFF),
+        @intCast((long >> 48) & 0xFF),
+        @intCast((long >> 40) & 0xFF),
+        @intCast((long >> 32) & 0xFF),
+        @intCast((long >> 24) & 0xFF),
+        @intCast((long >> 16) & 0xFF),
+        @intCast((long >> 8) & 0xFF),
+        @intCast(long & 0xFF),
+    };
+    try writer.writeAll(&bytes);
+}
+
+test "Long" {
+    print("--- Test: Long ---\n", .{});
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]i64{ 0, 1, 2, 127, 128, 255, std.math.maxInt(i64), -1, std.math.minInt(i64) };
+    for (values) |v| {
+        try writeLong(&writer, v);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000001,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000010,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b01111111,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b10000000,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b11111111,
+        0b01111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+        0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+        0b10000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+    };
+    for (bytes, 0..) |b, i| {
+        print("Encoded byte: {b:0>8}, Expected: {b:0>8}\n", .{ buf[i], b });
+        try std.testing.expect(buf[i] == b);
+    }
+
+    for (values) |v| {
+        const read_value = try readLong(&reader);
         print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
         try std.testing.expect(read_value == v);
     }
