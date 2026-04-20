@@ -34,16 +34,16 @@ fn handleClient(client: net.Server.Connection) !void {
 
     var read_buf: [10000]u8 = undefined;
     var r = client.stream.reader(&read_buf);
-    const reader: *std.io.Reader = r.interface();
+    const tcp_reader: *std.io.Reader = r.interface();
 
     var write_buf: [10000]u8 = undefined;
     var w = client.stream.writer(&write_buf);
-    const writer: *std.io.Writer = &w.interface;
-
+    const tcp_writer: *std.io.Writer = &w.interface;
+    
     var state: State = State.Handshaking;
 
     while (true) {
-        readPacket(reader, writer, &state) catch |err| {
+        const packet_id, const data = readPacket(tcp_reader) catch |err| {
             if (err == error.EndOfStream) {
                 print("Client disconnected: {f}\n", .{client.address});
                 return;
@@ -51,36 +51,54 @@ fn handleClient(client: net.Server.Connection) !void {
             print("Error reading packet: {}\n", .{err});
             return;
         };
+        try processPacket(tcp_writer, &state, packet_id, data);
     }
 }
 
-fn readPacket(reader: *std.io.Reader, writer: *std.io.Writer, state: *State) !void {
-    const length = try io.readVarInt(reader);
+fn readPacket(tcp_reader: *std.io.Reader) !struct{u8, []u8} {
+    const length = try io.readVarInt(tcp_reader);
     if (length == 0) {
-        print("Received empty packet\n", .{});
-        return;
+        return error.EmptyPacket;
     }
-    const packet_id = try reader.takeByte();
-    const data = try reader.peek(@intCast(length - 1)); // packet_id is 1 byte
-    print("Received packet: id 0x{x:0>2}, length {d}, data 0x{x}\n", .{ packet_id, length, data });
-    
+    const packet_id = try tcp_reader.takeByte();
+    const data = try tcp_reader.take(@intCast(length - 1)); // packet_id is 1 byte
+    print("  ⇣ Received packet: length {d}, id 0x{x:0>2}, data 0x{x}\n", .{ length, packet_id, data });
+    return .{packet_id, data};
+}
+
+fn writePacket(tcp_writer: *std.io.Writer, packet_id: u8, data: []const u8) !void {
+    try io.writeVarInt(tcp_writer, @intCast(data.len + 1));
+    try tcp_writer.writeByte(packet_id);
+    try tcp_writer.writeAll(data);
+    try tcp_writer.flush();
+    print("  ⇡ Sent packet: length {d}, id 0x{x:0>2}, data 0x{x}\n", .{ data.len + 1, packet_id, data });
+}
+
+fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
+    var r = std.io.Reader.fixed(req_data);
+    const req_reader = &r;
+
+    var res_data: [10000]u8 = undefined;
+    var w = std.io.Writer.fixed(&res_data);
+    const res_writer = &w;
+
     if (state.* == State.Handshaking and packet_id == 0x00) {
         // handshake request
-        const protocol_version = try io.readVarInt(reader);
-        const server_address = try io.readString(reader);
-        const server_port = try io.readShort(reader);
-        const intent = try io.readVarInt(reader);
-        print("  intention: protocol_version {d}, server_address {s}, server_port {d}, intent {d}\n", .{ protocol_version, server_address, server_port, intent });
+        const protocol_version = try io.readVarInt(req_reader);
+        const server_address = try io.readString(req_reader);
+        const server_port = try io.readShort(req_reader);
+        const intent = try io.readVarInt(req_reader);
+        print("        intention: protocol_version {d}, server_address {s}, server_port {d}, intent {d}\n", .{ protocol_version, server_address, server_port, intent });
 
         if (intent == 1) {
-            state.* = State.Status;
+            setState(state, State.Status);
         } else if (intent == 2) {
-            state.* = State.Login;
+            setState(state, State.Login);
         }
 
     } else if (state.* == State.Status and packet_id == 0x00) {
         // status request
-        print("  status_request\n", .{});
+        print("        status_request\n", .{});
 
         const status =
             \\{
@@ -107,47 +125,46 @@ fn readPacket(reader: *std.io.Reader, writer: *std.io.Writer, state: *State) !vo
         ;
 
         // status response
-        try io.writeVarInt(writer, @intCast(io.computeStringByteLength(status) + 1));
-        try writer.writeByte(0x00); // packet id
-        try io.writeString(writer, status);
-        try writer.flush();
+        try io.writeString(res_writer, status);
+        try writePacket(tcp_writer, 0x00, res_writer.buffered());
 
     } else if (state.* == State.Status and packet_id == 0x01) {
         // ping request
-        const timestamp = try io.readLong(reader);
-        print("  ping_request: timestamp {d}\n", .{timestamp});
+        const timestamp = try io.readLong(req_reader);
+        print("        ping_request: timestamp {d}\n", .{timestamp});
 
         // pong response
-        try io.writeVarInt(writer, 9); // length of packet_id + timestamp
-        try writer.writeByte(0x01); // packet id
-        try io.writeLong(writer, timestamp);
-        try writer.flush();
+        try io.writeLong(res_writer, timestamp);
+        try writePacket(tcp_writer, 0x01, res_writer.buffered());
 
     } else if (state.* == State.Login and packet_id == 0x00) {
         // hello request
-        const name = try io.readString(reader);
-        const hasUUID = try io.readBool(reader);
+        const name = try io.readString(req_reader);
+        const hasUUID = try io.readBool(req_reader);
         var uuid: u128 = 0;
         if (hasUUID) {
-            uuid = try io.readUUID(reader);
+            uuid = try io.readUUID(req_reader);
         }
-        print("  hello: name {s}, uuid 0x{x:0>32}\n", .{name, uuid});
+        print("        hello: name {s}, uuid 0x{x:0>32}\n", .{name, uuid});
 
         // login success response (skip encryption)
-        try io.writeVarInt(writer, 1 + 16 + @as(i32, @intCast(io.computeStringByteLength(name))) + 1); // packet length
-        try writer.writeByte(0x02); // packet id
-        try io.writeUUID(writer, uuid); // uuid
-        try io.writeString(writer, name); // username
-        try io.writeVarInt(writer, 0); // length of properties array (0 for now)
-        try writer.flush();
-        state.* = State.Play;
+        try io.writeUUID(res_writer, uuid); // uuid
+        try io.writeString(res_writer, name); // username
+        try io.writeVarInt(res_writer, 0); // length of properties array (0 for now)
+        try writePacket(tcp_writer, 0x02, res_writer.buffered());
 
-        try io.writeVarInt(writer, @as(i32, @intCast(io.computeStringByteLength("{\"text\": \">:)\"}"))) + 1); // packet length
-        try writer.writeByte(0x1A);
-        try io.writeString(writer, "{\"text\": \">:)\"}");
-        try writer.flush();
+        setState(state, State.Play);
+
+        _ = res_writer.consumeAll();
+        try io.writeString(res_writer, "{\"text\": \">:)\"}");
+        try writePacket(tcp_writer, 0x1A, res_writer.buffered());
 
     } else {
-        print("  Unknown packet id 0x{x:0>2} in state {d}\n", .{ packet_id, state.* });
+        print("        unknown packet id 0x{x:0>2} in state {d}\n", .{ packet_id, state.* });
     }
+}
+
+fn setState(state: *State, newState: State) void {
+    print("        State change: {s} -> {s}\n", .{ @tagName(state.*), @tagName(newState) });
+    state.* = newState;
 }
