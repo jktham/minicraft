@@ -18,6 +18,40 @@ test "buf reader/writer" {
     }
 }
 
+pub fn readBool(reader: *std.io.Reader) !bool {
+    const byte = try reader.takeByte();
+    if (byte == 0) {
+        return false;
+    } else if (byte == 1) {
+        return true;
+    } else {
+        return error.InvalidBoolean;
+    }
+}
+
+pub fn writeBool(writer: *std.io.Writer, value: bool) !void {
+    try writer.writeByte(if (value) 1 else 0);
+}
+
+test "Bool" {
+    print("--- Test: Bool ---\n", .{});
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]bool{ false, true };
+    for (values) |v| {
+        try writeBool(&writer, v);
+    }
+    try writer.flush();
+
+    for (values) |v| {
+        const read_value = try readBool(&reader);
+        print("Read value: {}, Expected: {}\n", .{ read_value, v });
+        try std.testing.expect(read_value == v);
+    }
+}
+
 pub fn readVarInt(reader: *std.io.Reader) !i32 {
     const CONTINUE_MASK: u8 = 0b10000000;
     const DATA_MASK: u8 = 0b01111111;
@@ -218,6 +252,68 @@ test "Long" {
 
     for (values) |v| {
         const read_value = try readLong(&reader);
+        print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
+        try std.testing.expect(read_value == v);
+    }
+}
+
+pub fn readUUID(reader: *std.io.Reader) !u128 {
+    const bytes = try reader.take(16);
+    const uuid: u128 = @as(u128, bytes[0]) << 120 | @as(u128, bytes[1]) << 112 | @as(u128, bytes[2]) << 104 | @as(u128, bytes[3]) << 96 | @as(u128, bytes[4]) << 88 | @as(u128, bytes[5]) << 80 | @as(u128, bytes[6]) << 72 | @as(u128, bytes[7]) << 64 | @as(u128, bytes[8]) << 56 | @as(u128, bytes[9]) << 48 | @as(u128, bytes[10]) << 40 | @as(u128, bytes[11]) << 32 | @as(u128, bytes[12]) << 24 | @as(u128, bytes[13]) << 16 | @as(u128, bytes[14]) << 8 | @as(u128, bytes[15]);
+    return uuid;
+}
+
+pub fn writeUUID(writer: *std.io.Writer, uuid: u128) !void {
+    const bytes: [16]u8 = .{
+        @intCast((uuid >> 120) & 0xFF),
+        @intCast((uuid >> 112) & 0xFF),
+        @intCast((uuid >> 104) & 0xFF),
+        @intCast((uuid >> 96) & 0xFF),
+        @intCast((uuid >> 88) & 0xFF),
+        @intCast((uuid >> 80) & 0xFF),
+        @intCast((uuid >> 72) & 0xFF),
+        @intCast((uuid >> 64) & 0xFF),
+        @intCast((uuid >> 56) & 0xFF),
+        @intCast((uuid >> 48) & 0xFF),
+        @intCast((uuid >> 40) & 0xFF),
+        @intCast((uuid >> 32) & 0xFF),
+        @intCast((uuid >> 24) & 0xFF),
+        @intCast((uuid >> 16) & 0xFF),
+        @intCast((uuid >> 8) & 0xFF),
+        @intCast(uuid & 0xFF),
+    };
+    try writer.writeAll(&bytes);
+}
+
+test "UUID" {
+    print("--- Test: UUID ---\n", .{});
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]u128{ 0, 1, 2, 127, 128, 255, std.math.maxInt(u128), std.math.minInt(u128) };
+    for (values) |v| {
+        try writeUUID(&writer, v);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000001,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000010,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b01111111,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b10000000,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b11111111,
+        0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+    };
+    for (bytes, 0..) |b, i| {
+        print("Encoded byte: {b:0>8}, Expected: {b:0>8}\n", .{ buf[i], b });
+        try std.testing.expect(buf[i] == b);
+    }
+
+    for (values) |v| {
+        const read_value = try readUUID(&reader);
         print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
         try std.testing.expect(read_value == v);
     }
