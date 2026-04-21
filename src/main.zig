@@ -103,8 +103,8 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const status =
             \\{
             \\    "version": {
-            \\        "name": "1.20.1",
-            \\        "protocol": 763
+            \\        "name": "1.12.2",
+            \\        "protocol": 340
             \\    },
             \\    "players": {
             \\        "max": 20,
@@ -140,17 +140,11 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
     } else if (state.* == State.Login and packet_id == 0x00) {
         // hello request
         const name = try io.readString(req_reader);
-        const hasUUID = try io.readBool(req_reader);
-        var uuid: u128 = 0;
-        if (hasUUID) {
-            uuid = try io.readUUID(req_reader);
-        }
-        print("        hello: name {s}, uuid 0x{x:0>32}\n", .{name, uuid});
+        print("        hello: name {s}\n", .{name});
 
         // login success response (skip encryption)
-        try io.writeUUID(res_writer, uuid); // uuid
+        try io.writeString(res_writer, "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"); // uuid
         try io.writeString(res_writer, name); // username
-        try io.writeVarInt(res_writer, 0); // length of properties array (0 for now)
         try writePacket(tcp_writer, 0x02, res_writer.buffered());
 
         setState(state, State.Play);
