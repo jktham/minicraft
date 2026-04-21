@@ -62,7 +62,7 @@ fn readPacket(tcp_reader: *std.io.Reader) !struct{u8, []u8} {
     }
     const packet_id = try tcp_reader.takeByte();
     const data = try tcp_reader.take(@intCast(length - 1)); // packet_id is 1 byte
-    print("  ⇣ Received packet: length {d}, id 0x{x:0>2}, data 0x{x}\n", .{ length, packet_id, data });
+    print("  ⇣ Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})\n", .{ length, packet_id, data, data });
     return .{packet_id, data};
 }
 
@@ -71,7 +71,7 @@ fn writePacket(tcp_writer: *std.io.Writer, packet_id: u8, data: []const u8) !voi
     try tcp_writer.writeByte(packet_id);
     try tcp_writer.writeAll(data);
     try tcp_writer.flush();
-    print("  ⇡ Sent packet: length {d}, id 0x{x:0>2}, data 0x{x}\n", .{ data.len + 1, packet_id, data });
+    print("  ⇡ Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})\n", .{ data.len + 1, packet_id, data, data });
 }
 
 fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
@@ -149,12 +149,66 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
 
         setState(state, State.Play);
 
+        // // disconnect
+        // _ = res_writer.consumeAll();
+        // try io.writeString(res_writer, "{\"text\": \">:)\"}");
+        // try writePacket(tcp_writer, 0x1A, res_writer.buffered());
+
+        // join game
         _ = res_writer.consumeAll();
-        try io.writeString(res_writer, "{\"text\": \">:)\"}");
-        try writePacket(tcp_writer, 0x1A, res_writer.buffered());
+        try io.writeInt(res_writer, 0); // entity id
+        try io.writeByte(res_writer, 1); // gamemode
+        try io.writeInt(res_writer, 0); // dimension
+        try io.writeByte(res_writer, 0); // difficulty
+        try io.writeByte(res_writer, 0); // max players
+        try io.writeString(res_writer, "flat"); // level type
+        try io.writeBool(res_writer, false); // reduced debug info
+        try writePacket(tcp_writer, 0x23, res_writer.buffered());
+
+        // spawn position
+        _ = res_writer.consumeAll();
+        try io.writeInt(res_writer, 0); // x
+        try io.writeInt(res_writer, 0); // z
+        try writePacket(tcp_writer, 0x46, res_writer.buffered());
+
+        // chunk data
+        _ = res_writer.consumeAll();
+        try io.writeInt(res_writer, 0); // chunk x
+        try io.writeInt(res_writer, 0); // chunk z
+        try io.writeBool(res_writer, true); // continuous
+        try io.writeVarInt(res_writer, 0b1); // primary bit mask
+        try io.writeVarInt(res_writer, 0 + 256); // data length
+        try res_writer.writeAll(&[_]u8{}); // data
+        try res_writer.writeAll(&[_]u8{0} ** 256); // biomes
+        try io.writeVarInt(res_writer, 0); // number of block entities
+        try writePacket(tcp_writer, 0x20, res_writer.buffered());
+
+    } else if (state.* == State.Play and packet_id == 0x04) {
+        // client settings
+        const locale = try io.readString(req_reader);
+        const view_distance = try io.readByte(req_reader);
+        const chat_mode = try io.readVarInt(req_reader);
+        const chat_colors = try io.readBool(req_reader);
+        const skin_parts = try io.readByte(req_reader);
+        const main_hand = try io.readVarInt(req_reader);
+        print("        client_settings: locale {s}, view_distance {d}, chat_mode {d}, chat_colors {}, skin_parts {d}, main_hand {d}\n", .{ locale, view_distance, chat_mode, chat_colors, skin_parts, main_hand });
+
+    } else if (state.* == State.Play and packet_id == 0x09) {
+        // plugin message
+        const channel = try io.readString(req_reader);
+        const payload = try req_reader.allocRemaining(std.heap.page_allocator, std.io.Limit.unlimited);
+        print("        plugin_message: channel {s}, payload 0x{x} ({s})\n", .{ channel, payload, payload });
+
+    } else if (state.* == State.Play and packet_id == 0x0d) {
+        // position update
+        const x = try io.readDouble(req_reader);
+        const y = try io.readDouble(req_reader);
+        const z = try io.readDouble(req_reader);
+        const on_ground = try io.readBool(req_reader);
+        print("        position_update: x {}, y {}, z {}, on_ground {}\n", .{ x, y, z, on_ground });
 
     } else {
-        print("        unknown packet id 0x{x:0>2} in state {d}\n", .{ packet_id, state.* });
+        print("        unknown packet id 0x{x:0>2} in state {s}\n", .{ packet_id, @tagName(state.*) });
     }
 }
 

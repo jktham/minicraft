@@ -18,6 +18,14 @@ test "buf reader/writer" {
     }
 }
 
+pub fn readByte(reader: *std.io.Reader) !u8 {
+    return reader.takeByte();
+}
+
+pub fn writeByte(writer: *std.io.Writer, value: u8) !void {
+    try writer.writeByte(value);
+}
+
 pub fn readBool(reader: *std.io.Reader) !bool {
     const byte = try reader.takeByte();
     if (byte == 0) {
@@ -202,6 +210,22 @@ test "Short" {
     }
 }
 
+pub fn readInt(reader: *std.io.Reader) !i32 {
+    const bytes = try reader.take(4);
+    const int: i32 = @as(i32, bytes[0]) << 24 | @as(i32, bytes[1]) << 16 | @as(i32, bytes[2]) << 8 | @as(i32, bytes[3]);
+    return int;
+}
+
+pub fn writeInt(writer: *std.io.Writer, int: i32) !void {
+    const bytes: [4]u8 = .{
+        @intCast((int >> 24) & 0xFF),
+        @intCast((int >> 16) & 0xFF),
+        @intCast((int >> 8) & 0xFF),
+        @intCast(int & 0xFF),
+    };
+    try writer.writeAll(&bytes);
+}
+
 pub fn readLong(reader: *std.io.Reader) !i64 {
     const bytes = try reader.take(8);
     const long: i64 = @as(i64, bytes[0]) << 56 | @as(i64, bytes[1]) << 48 | @as(i64, bytes[2]) << 40 | @as(i64, bytes[3]) << 32 | @as(i64, bytes[4]) << 24 | @as(i64, bytes[5]) << 16 | @as(i64, bytes[6]) << 8 | @as(i64, bytes[7]);
@@ -255,6 +279,27 @@ test "Long" {
         print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
         try std.testing.expect(read_value == v);
     }
+}
+
+pub fn readDouble(reader: *std.io.Reader) !f64 {
+    const bytes = try reader.take(8);
+    const long: u64 = @as(u64, bytes[0]) << 56 | @as(u64, bytes[1]) << 48 | @as(u64, bytes[2]) << 40 | @as(u64, bytes[3]) << 32 | @as(u64, bytes[4]) << 24 | @as(u64, bytes[5]) << 16 | @as(u64, bytes[6]) << 8 | @as(u64, bytes[7]);
+    return @bitCast(long);
+}
+
+pub fn writeDouble(writer: *std.io.Writer, value: f64) !void {
+    const long: u64 = @bitCast(value);
+    const bytes: [8]u8 = .{
+        @intCast((long >> 56) & 0xFF),
+        @intCast((long >> 48) & 0xFF),
+        @intCast((long >> 40) & 0xFF),
+        @intCast((long >> 32) & 0xFF),
+        @intCast((long >> 24) & 0xFF),
+        @intCast((long >> 16) & 0xFF),
+        @intCast((long >> 8) & 0xFF),
+        @intCast(long & 0xFF),
+    };
+    try writer.writeAll(&bytes);
 }
 
 pub fn readUUID(reader: *std.io.Reader) !u128 {
