@@ -12,7 +12,7 @@ const State = enum {
 };
 
 pub fn main() !void {
-    const loopback = try net.Ip4Address.parse("127.0.0.1", 25565);
+    const loopback = try net.Ip4Address.parse("0.0.0.0", 25565);
     const localhost = net.Address{ .in = loopback };
     var server = try localhost.listen(.{
         .reuse_address = true,
@@ -62,7 +62,7 @@ fn readPacket(tcp_reader: *std.io.Reader) !struct{u8, []u8} {
     }
     const packet_id = try tcp_reader.takeByte();
     const data = try tcp_reader.take(@intCast(length - 1)); // packet_id is 1 byte
-    print("  ⇣ Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})\n", .{ length, packet_id, data, data });
+    if (!muted(packet_id)) print("  ⇣ Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})\n", .{ length, packet_id, data, try sanitizeString(data) });
     return .{packet_id, data};
 }
 
@@ -71,7 +71,7 @@ fn writePacket(tcp_writer: *std.io.Writer, packet_id: u8, data: []const u8) !voi
     try tcp_writer.writeByte(packet_id);
     try tcp_writer.writeAll(data);
     try tcp_writer.flush();
-    print("  ⇡ Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})\n", .{ data.len + 1, packet_id, data, data });
+    print("  ⇡ Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})\n", .{ data.len + 1, packet_id, data, try sanitizeString(data) });
 }
 
 fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
@@ -205,14 +205,33 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const y = try io.readDouble(req_reader);
         const z = try io.readDouble(req_reader);
         const on_ground = try io.readBool(req_reader);
-        print("        position_update: x {}, y {}, z {}, on_ground {}\n", .{ x, y, z, on_ground });
+        if (!muted(packet_id)) print("        position_update: x {}, y {}, z {}, on_ground {}\n", .{ x, y, z, on_ground });
 
     } else {
-        print("        unknown packet id 0x{x:0>2} in state {s}\n", .{ packet_id, @tagName(state.*) });
+        if (!muted(packet_id)) print("        unknown packet id 0x{x:0>2} in state {s}\n", .{ packet_id, @tagName(state.*) });
     }
 }
 
 fn setState(state: *State, newState: State) void {
     print("        State change: {s} -> {s}\n", .{ @tagName(state.*), @tagName(newState) });
     state.* = newState;
+}
+
+fn sanitizeString(str: []const u8) ![]const u8 {
+    var sanitized = try std.heap.page_allocator.dupe(u8, str);
+    for (sanitized, 0..sanitized.len) |c, i| {
+        if (c >= 32 and c < 127) {
+            sanitized[i] = c;
+        } else {
+            sanitized[i] = '?';
+        }
+    }
+    return sanitized;
+}
+
+fn muted(packet_id: u8) bool {
+    return (
+        packet_id == 0x0d or
+        packet_id == 0x0e
+    );
 }
