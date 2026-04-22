@@ -1,8 +1,34 @@
 const std = @import("std");
 const minicraft = @import("minicraft");
 const net = std.net;
-const print = std.debug.print;
 const io = minicraft.io;
+
+pub const std_options: std.Options = .{
+    .logFn = colorLogFn,
+    // .log_level = std.log.Level.debug,
+};
+
+pub fn colorLogFn(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    const color = switch (message_level) {
+        .err => "\x1b[31m", // red
+        .warn => "\x1b[33m", // yellow
+        .info => "\x1b[37m", // white
+        .debug => "\x1b[34m", // blue
+    };
+    const reset = "\x1b[0m";
+
+    const level_txt = comptime message_level.asText();
+    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    var buffer: [64]u8 = undefined;
+    const stderr = std.debug.lockStderrWriter(&buffer);
+    defer std.debug.unlockStderrWriter();
+    nosuspend stderr.print(color ++ level_txt ++ prefix2 ++ format ++ reset ++ "\n", args) catch return;
+}
 
 const State = enum {
     Handshaking,
@@ -12,15 +38,14 @@ const State = enum {
 };
 
 pub fn main() !void {
-    const loopback = try net.Ip4Address.parse("0.0.0.0", 25565);
-    const localhost = net.Address{ .in = loopback };
-    var server = try localhost.listen(.{
+    const in = try net.Ip4Address.parse("0.0.0.0", 25565);
+    const address = net.Address{ .in = in };
+    var server = try address.listen(.{
         .reuse_address = true,
     });
     defer server.deinit();
 
-    const addr = server.listen_address;
-    print("Listening on {}\n", .{addr.getPort()});
+    std.log.info("Listening on {f}", .{server.listen_address});
 
     while (true) {
         const client = try server.accept();
@@ -29,7 +54,7 @@ pub fn main() !void {
 }
 
 fn handleClient(client: net.Server.Connection) !void {
-    print("Client connected: {f}\n", .{client.address});
+    std.log.info("Client connected: {f}", .{client.address});
     defer client.stream.close();
 
     var read_buf: [10000]u8 = undefined;
@@ -45,10 +70,10 @@ fn handleClient(client: net.Server.Connection) !void {
     while (true) {
         const packet_id, const data = readPacket(tcp_reader) catch |err| {
             if (err == error.EndOfStream) {
-                print("Client disconnected: {f}\n", .{client.address});
+                std.log.info("Client disconnected: {f}", .{client.address});
                 return;
             }
-            print("Error reading packet: {}\n", .{err});
+            std.log.err("Error reading packet: {}", .{err});
             return;
         };
         try processPacket(tcp_writer, &state, packet_id, data);
@@ -62,7 +87,7 @@ fn readPacket(tcp_reader: *std.io.Reader) !struct{u8, []u8} {
     }
     const packet_id = try tcp_reader.takeByte();
     const data = try tcp_reader.take(@intCast(length - 1)); // packet_id is 1 byte
-    if (!muted(packet_id)) print("  ⇣ Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})\n", .{ length, packet_id, data, try sanitizeString(data) });
+    std.log.debug("Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ length, packet_id, data, try sanitizeString(data) });
     return .{packet_id, data};
 }
 
@@ -71,7 +96,7 @@ fn writePacket(tcp_writer: *std.io.Writer, packet_id: u8, data: []const u8) !voi
     try tcp_writer.writeByte(packet_id);
     try tcp_writer.writeAll(data);
     try tcp_writer.flush();
-    print("  ⇡ Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})\n", .{ data.len + 1, packet_id, data, try sanitizeString(data) });
+    std.log.debug("Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ data.len + 1, packet_id, data, try sanitizeString(data) });
 }
 
 fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
@@ -88,7 +113,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const server_address = try io.readString(req_reader);
         const server_port = try io.readShort(req_reader);
         const intent = try io.readVarInt(req_reader);
-        print("        intention: protocol_version {d}, server_address {s}, server_port {d}, intent {d}\n", .{ protocol_version, server_address, server_port, intent });
+        std.log.info("handshake: protocol_version {d}, server_address {s}, server_port {d}, intent {d}", .{ protocol_version, server_address, server_port, intent });
 
         if (intent == 1) {
             setState(state, State.Status);
@@ -98,7 +123,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
 
     } else if (state.* == State.Status and packet_id == 0x00) {
         // status request
-        print("        status_request\n", .{});
+        std.log.info("status_request", .{});
 
         const status =
             \\{
@@ -131,7 +156,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
     } else if (state.* == State.Status and packet_id == 0x01) {
         // ping request
         const timestamp = try io.readLong(req_reader);
-        print("        ping_request: timestamp {d}\n", .{timestamp});
+        std.log.info("ping_request: timestamp {d}", .{timestamp});
 
         // pong response
         try io.writeLong(res_writer, timestamp);
@@ -140,7 +165,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
     } else if (state.* == State.Login and packet_id == 0x00) {
         // hello request
         const name = try io.readString(req_reader);
-        print("        hello: name {s}\n", .{name});
+        std.log.info("hello: name {s}", .{name});
 
         // login success response (skip encryption)
         try io.writeString(res_writer, "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"); // uuid
@@ -191,13 +216,13 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const chat_colors = try io.readBool(req_reader);
         const skin_parts = try io.readByte(req_reader);
         const main_hand = try io.readVarInt(req_reader);
-        print("        client_settings: locale {s}, view_distance {d}, chat_mode {d}, chat_colors {}, skin_parts {d}, main_hand {d}\n", .{ locale, view_distance, chat_mode, chat_colors, skin_parts, main_hand });
+        std.log.info("client_settings: locale {s}, view_distance {d}, chat_mode {d}, chat_colors {}, skin_parts {d}, main_hand {d}", .{ locale, view_distance, chat_mode, chat_colors, skin_parts, main_hand });
 
     } else if (state.* == State.Play and packet_id == 0x09) {
         // plugin message
         const channel = try io.readString(req_reader);
         const payload = try req_reader.allocRemaining(std.heap.page_allocator, std.io.Limit.unlimited);
-        print("        plugin_message: channel {s}, payload 0x{x} ({s})\n", .{ channel, payload, payload });
+        std.log.info("plugin_message: channel {s}, payload 0x{x} ({s})", .{ channel, payload, payload });
 
     } else if (state.* == State.Play and packet_id == 0x0d) {
         // position update
@@ -205,15 +230,32 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const y = try io.readDouble(req_reader);
         const z = try io.readDouble(req_reader);
         const on_ground = try io.readBool(req_reader);
-        if (!muted(packet_id)) print("        position_update: x {}, y {}, z {}, on_ground {}\n", .{ x, y, z, on_ground });
+        std.log.info("position_update: x {}, y {}, z {}, on_ground {}", .{ x, y, z, on_ground });
+
+    } else if (state.* == State.Play and packet_id == 0x0e) {
+        // position and look update
+        const x = try io.readDouble(req_reader);
+        const y = try io.readDouble(req_reader);
+        const z = try io.readDouble(req_reader);
+        const yaw = try io.readFloat(req_reader);
+        const pitch = try io.readFloat(req_reader);
+        const on_ground = try io.readBool(req_reader);
+        std.log.info("position_look_update: x {}, y {}, z {}, yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
+
+    } else if (state.* == State.Play and packet_id == 0x0f) {
+        // look update
+        const yaw = try io.readFloat(req_reader);
+        const pitch = try io.readFloat(req_reader);
+        const on_ground = try io.readBool(req_reader);
+        std.log.info("look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
 
     } else {
-        if (!muted(packet_id)) print("        unknown packet id 0x{x:0>2} in state {s}\n", .{ packet_id, @tagName(state.*) });
+        std.log.info("unknown packet id 0x{x:0>2} in state {s}", .{ packet_id, @tagName(state.*) });
     }
 }
 
 fn setState(state: *State, newState: State) void {
-    print("        State change: {s} -> {s}\n", .{ @tagName(state.*), @tagName(newState) });
+    std.log.info("State change: {s} -> {s}", .{ @tagName(state.*), @tagName(newState) });
     state.* = newState;
 }
 

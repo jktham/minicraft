@@ -281,6 +281,23 @@ test "Long" {
     }
 }
 
+pub fn readFloat(reader: *std.io.Reader) !f32 {
+    const bytes = try reader.take(4);
+    const int: u32 = @as(u32, bytes[0]) << 24 | @as(u32, bytes[1]) << 16 | @as(u32, bytes[2]) << 8 | @as(u32, bytes[3]);
+    return @bitCast(int);
+}
+
+pub fn writeFloat(writer: *std.io.Writer, value: f32) !void {
+    const int: u32 = @bitCast(value);
+    const bytes: [4]u8 = .{
+        @intCast((int >> 24) & 0xFF),
+        @intCast((int >> 16) & 0xFF),
+        @intCast((int >> 8) & 0xFF),
+        @intCast(int & 0xFF),
+    };
+    try writer.writeAll(&bytes);
+}
+
 pub fn readDouble(reader: *std.io.Reader) !f64 {
     const bytes = try reader.take(8);
     const long: u64 = @as(u64, bytes[0]) << 56 | @as(u64, bytes[1]) << 48 | @as(u64, bytes[2]) << 40 | @as(u64, bytes[3]) << 32 | @as(u64, bytes[4]) << 24 | @as(u64, bytes[5]) << 16 | @as(u64, bytes[6]) << 8 | @as(u64, bytes[7]);
