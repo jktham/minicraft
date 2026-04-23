@@ -1,20 +1,21 @@
 const std = @import("std");
 const print = std.debug.print;
 
-test "buf reader/writer" {
-    print("--- Test: buf reader/writer ---\n", .{});
+test "testBuf" {
     var buf: [1000]u8 = undefined;
     var reader = std.io.Reader.fixed(&buf);
     var writer = std.io.Writer.fixed(&buf);
 
-    const values = [_]u8{ 0, 1, 127 };
+    const values = [_]u8{ 0, 1, 127, 255 };
     for (values) |v| {
         try writer.writeByte(v);
     }
-    for (values) |v| {
+    for (values, 0..) |v, i| {
         const read_value = try reader.takeByte();
-        print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
-        try std.testing.expect(read_value == v);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
     }
 }
 
@@ -24,6 +25,26 @@ pub fn readByte(reader: *std.io.Reader) !u8 {
 
 pub fn writeByte(writer: *std.io.Writer, value: u8) !void {
     try writer.writeByte(value);
+}
+
+test "testByte" {
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]u8{ 0, 1, 127, 255 };
+    for (values) |v| {
+        try writeByte(&writer, v);
+    }
+    try writer.flush();
+
+    for (values, 0..) |v, i| {
+        const read_value = try readByte(&reader);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
+    }
 }
 
 pub fn readBool(reader: *std.io.Reader) !bool {
@@ -41,8 +62,7 @@ pub fn writeBool(writer: *std.io.Writer, value: bool) !void {
     try writer.writeByte(if (value) 1 else 0);
 }
 
-test "Bool" {
-    print("--- Test: Bool ---\n", .{});
+test "testBool" {
     var buf: [1000]u8 = undefined;
     var reader = std.io.Reader.fixed(&buf);
     var writer = std.io.Writer.fixed(&buf);
@@ -53,10 +73,23 @@ test "Bool" {
     }
     try writer.flush();
 
-    for (values) |v| {
+    const bytes = [_]u8{
+        0b00000000,
+        0b00000001,
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
+    }
+
+    for (values, 0..) |v, i| {
         const read_value = try readBool(&reader);
-        print("Read value: {}, Expected: {}\n", .{ read_value, v });
-        try std.testing.expect(read_value == v);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
     }
 }
 
@@ -65,10 +98,10 @@ pub fn readVarInt(reader: *std.io.Reader) !i32 {
     const DATA_MASK: u8 = 0b01111111;
 
     var value: u32 = 0;
-    var position: u5 = 0;
+    var position: u32 = 0; // not u5 to avoid overflow panic, instead handle by checking if position >= 32
     while (true) {
         const byte: u8 = try reader.takeByte();
-        value |= @as(u32, byte & DATA_MASK) << position;
+        value |= @as(u32, byte & DATA_MASK) << @truncate(position);
 
         if ((byte & CONTINUE_MASK) == 0) {
             break;
@@ -102,8 +135,7 @@ pub fn writeVarInt(writer: *std.io.Writer, value: i32) !void {
     }
 }
 
-test "VarInt" {
-    print("--- Test: VarInt ---\n", .{});
+test "testVarInt" {
     var buf: [1000]u8 = undefined;
     var reader = std.io.Reader.fixed(&buf);
     var writer = std.io.Writer.fixed(&buf);
@@ -126,15 +158,23 @@ test "VarInt" {
         0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b00001000,
     };
     for (bytes, 0..) |b, i| {
-        print("Encoded byte: {b:0>8}, Expected: {b:0>8}\n", .{ buf[i], b });
-        try std.testing.expect(buf[i] == b);
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
     }
 
-    for (values) |v| {
+    for (values, 0..) |v, i| {
         const read_value = try readVarInt(&reader);
-        print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
-        try std.testing.expect(read_value == v);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
     }
+
+    try writer.writeAll(&[_]u8{0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b00000000}); // invalid VarInt (too long)
+    try writer.flush();
+    try std.testing.expectError(error.InvalidVarInt, readVarInt(&reader));
 }
 
 pub fn computeVarIntByteLength(value: i32) usize {
@@ -150,14 +190,15 @@ pub fn computeVarIntByteLength(value: i32) usize {
     return length;
 }
 
-test "VarInt byte length" {
-    print("--- Test: VarInt byte length ---\n", .{});
+test "testVarIntByteLength" {
     const values = [_]i32{ 0, 1, 2, 127, 128, 255, std.math.maxInt(i32), -1, std.math.minInt(i32) };
     const expected_lengths = [_]usize{ 1, 1, 1, 1, 2, 2, 5, 5, 5 };
     for (values, 0..) |v, i| {
         const length = computeVarIntByteLength(v);
-        print("Value: {d}, Byte length: {d}, Expected: {d}\n", .{ v, length, expected_lengths[i] });
-        try std.testing.expect(length == expected_lengths[i]);
+        std.testing.expect(length == expected_lengths[i]) catch |err| {
+            print("computed {}, expected {} at index {}\n", .{length, expected_lengths[i], i});
+            return err;
+        };
     }
 }
 
@@ -175,8 +216,7 @@ pub fn writeShort(writer: *std.io.Writer, short: i16) !void {
     try writer.writeAll(&bytes);
 }
 
-test "Short" {
-    print("--- Test: Short ---\n", .{});
+test "testShort" {
     var buf: [1000]u8 = undefined;
     var reader = std.io.Reader.fixed(&buf);
     var writer = std.io.Writer.fixed(&buf);
@@ -199,14 +239,18 @@ test "Short" {
         0b10000000, 0b00000000,
     };
     for (bytes, 0..) |b, i| {
-        print("Encoded byte: {b:0>8}, Expected: {b:0>8}\n", .{ buf[i], b });
-        try std.testing.expect(buf[i] == b);
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
     }
 
-    for (values) |v| {
+    for (values, 0..) |v, i| {
         const read_value = try readShort(&reader);
-        print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
-        try std.testing.expect(read_value == v);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
     }
 }
 
@@ -224,6 +268,44 @@ pub fn writeInt(writer: *std.io.Writer, int: i32) !void {
         @intCast(int & 0xFF),
     };
     try writer.writeAll(&bytes);
+}
+
+test "testInt" {
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]i32{ 0, 1, 2, 127, 128, 255, std.math.maxInt(i32), -1, std.math.minInt(i32) };
+    for (values) |v| {
+        try writeInt(&writer, v);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b00000000, 0b00000000, 0b00000000, 0b00000001,
+        0b00000000, 0b00000000, 0b00000000, 0b00000010,
+        0b00000000, 0b00000000, 0b00000000, 0b01111111,
+        0b00000000, 0b00000000, 0b00000000, 0b10000000,
+        0b00000000, 0b00000000, 0b00000000, 0b11111111,
+        0b01111111, 0b11111111, 0b11111111, 0b11111111,
+        0b11111111, 0b11111111, 0b11111111, 0b11111111,
+        0b10000000, 0b00000000, 0b00000000, 0b00000000,
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
+    }
+
+    for (values, 0..) |v, i| {
+        const read_value = try readInt(&reader);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
+    }
 }
 
 pub fn readLong(reader: *std.io.Reader) !i64 {
@@ -246,8 +328,7 @@ pub fn writeLong(writer: *std.io.Writer, long: i64) !void {
     try writer.writeAll(&bytes);
 }
 
-test "Long" {
-    print("--- Test: Long ---\n", .{});
+test "testLong" {
     var buf: [1000]u8 = undefined;
     var reader = std.io.Reader.fixed(&buf);
     var writer = std.io.Writer.fixed(&buf);
@@ -270,14 +351,18 @@ test "Long" {
         0b10000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
     };
     for (bytes, 0..) |b, i| {
-        print("Encoded byte: {b:0>8}, Expected: {b:0>8}\n", .{ buf[i], b });
-        try std.testing.expect(buf[i] == b);
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
     }
 
-    for (values) |v| {
+    for (values, 0..) |v, i| {
         const read_value = try readLong(&reader);
-        print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
-        try std.testing.expect(read_value == v);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
     }
 }
 
@@ -296,6 +381,41 @@ pub fn writeFloat(writer: *std.io.Writer, value: f32) !void {
         @intCast(int & 0xFF),
     };
     try writer.writeAll(&bytes);
+}
+
+test "testFloat" {
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]f32{ 0.0, 1.0, 2.0, std.math.floatMax(f32), -1.0, std.math.floatMin(f32) };
+    for (values) |v| {
+        try writeFloat(&writer, v);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b00111111, 0b10000000, 0b00000000, 0b00000000,
+        0b01000000, 0b00000000, 0b00000000, 0b00000000,
+        0b01111111, 0b01111111, 0b11111111, 0b11111111,
+        0b10111111, 0b10000000, 0b00000000, 0b00000000,
+        0b00000000, 0b10000000, 0b00000000, 0b00000000,
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
+    }
+
+    for (values, 0..) |v, i| {
+        const read_value = try readFloat(&reader);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
+    }
 }
 
 pub fn readDouble(reader: *std.io.Reader) !f64 {
@@ -317,6 +437,41 @@ pub fn writeDouble(writer: *std.io.Writer, value: f64) !void {
         @intCast(long & 0xFF),
     };
     try writer.writeAll(&bytes);
+}
+
+test "testDouble" {
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]f64{ 0.0, 1.0, 2.0, std.math.floatMax(f64), -1.0, std.math.floatMin(f64) };
+    for (values) |v| {
+        try writeDouble(&writer, v);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b00111111, 0b11110000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b01000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b01111111, 0b11101111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+        0b10111111, 0b11110000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b00000000, 0b00010000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
+    }
+
+    for (values, 0..) |v, i| {
+        const read_value = try readDouble(&reader);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
+    }
 }
 
 pub fn readUUID(reader: *std.io.Reader) !u128 {
@@ -347,8 +502,7 @@ pub fn writeUUID(writer: *std.io.Writer, uuid: u128) !void {
     try writer.writeAll(&bytes);
 }
 
-test "UUID" {
-    print("--- Test: UUID ---\n", .{});
+test "testUUID" {
     var buf: [1000]u8 = undefined;
     var reader = std.io.Reader.fixed(&buf);
     var writer = std.io.Writer.fixed(&buf);
@@ -370,19 +524,26 @@ test "UUID" {
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
     };
     for (bytes, 0..) |b, i| {
-        print("Encoded byte: {b:0>8}, Expected: {b:0>8}\n", .{ buf[i], b });
-        try std.testing.expect(buf[i] == b);
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
     }
 
-    for (values) |v| {
+    for (values, 0..) |v, i| {
         const read_value = try readUUID(&reader);
-        print("Read value: {d}, Expected: {d}\n", .{ read_value, v });
-        try std.testing.expect(read_value == v);
+        std.testing.expect(read_value == v) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
     }
 }
 
 pub fn readString(reader: *std.io.Reader) ![]u8 {
     const length = try readVarInt(reader);
+    if (length < 0) {
+        return error.InvalidStringLength;
+    }
     const string = try reader.take(@intCast(length));
     return string;
 }
@@ -392,8 +553,7 @@ pub fn writeString(writer: *std.io.Writer, string: []const u8) !void {
     try writer.writeAll(string);
 }
 
-test "String" {
-    print("--- Test: String ---\n", .{});
+test "testString" {
     var buf: [1000]u8 = undefined;
     var reader = std.io.Reader.fixed(&buf);
     var writer = std.io.Writer.fixed(&buf);
@@ -414,15 +574,23 @@ test "String" {
         'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x',
     };
     for (bytes, 0..) |b, i| {
-        print("Encoded byte: {b:0>8}, Expected: {b:0>8}\n", .{ buf[i], b });
-        try std.testing.expect(buf[i] == b);
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
     }
 
-    for (values) |v| {
+    for (values, 0..) |v, i| {
         const read_value = try readString(&reader);
-        print("Read value: {s}, Expected: {s}\n", .{ read_value, v });
-        try std.testing.expect(std.mem.eql(u8, read_value, v));
+        std.testing.expect(std.mem.eql(u8, read_value, v)) catch |err| {
+            print("read {s}, expected {s} at index {}\n", .{read_value, v, i});
+            return err;
+        };
     }
+
+    try writeVarInt(&writer, -1); // invalid length
+    try writer.flush();
+    try std.testing.expectError(error.InvalidStringLength, readString(&reader));
 }
 
 // returns total number of bytes that would be written for the given string, including the length prefix
@@ -430,13 +598,14 @@ pub fn computeStringByteLength(string: []const u8) usize {
     return string.len + computeVarIntByteLength(@intCast(string.len));
 }
 
-test "String byte length" {
-    print("--- Test: String byte length ---\n", .{});
+test "testStringByteLength" {
     const values = [_][]const u8{ "Test", "a", "", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }; // 128*x
     const expected_lengths = [_]usize{ 5, 2, 1, 130 };
     for (values, 0..) |v, i| {
         const length = computeStringByteLength(v);
-        print("Value: {s}, Byte length: {d}, Expected: {d}\n", .{ v, length, expected_lengths[i] });
-        try std.testing.expect(length == expected_lengths[i]);
+        std.testing.expect(length == expected_lengths[i]) catch |err| {
+            print("computed {}, expected {} at index {}\n", .{length, expected_lengths[i], i});
+            return err;
+        };
     }
 }
