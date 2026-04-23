@@ -1,6 +1,8 @@
 const std = @import("std");
 const net = std.net;
 const io = @import("io.zig");
+const player = @import("player.zig");
+const world = @import("world.zig");
 
 const State = enum {
     Handshaking,
@@ -17,8 +19,9 @@ pub fn startServer() !void {
     });
     defer server.deinit();
 
-    std.log.info("Listening on {f}", .{server.listen_address});
+    world.init();
 
+    std.log.info("Listening on {f}", .{server.listen_address});
     while (true) {
         const client = try server.accept();
         try handleClient(client);
@@ -58,7 +61,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
     var r = std.io.Reader.fixed(req_data);
     const req_reader = &r;
 
-    var res_data: [100000]u8 = undefined;
+    var res_data: [10000000]u8 = undefined;
     var w = std.io.Writer.fixed(&res_data);
     const res_writer = &w;
 
@@ -174,31 +177,42 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         try io.writePacket(tcp_writer, 0x2f, res_writer.buffered());
         _ = res_writer.consumeAll();
 
-        // chunk data
-        var chunk_data: [10000]u8 = undefined;
-        var cw = std.io.Writer.fixed(&chunk_data);
-        const chunk_writer = &cw;
+        std.log.info("chunk_data", .{});
+        for (0..world.N_CHUNKS) |chunk_x| {
+            for (0..world.N_CHUNKS) |chunk_z| {
+                // chunk data
+                var chunk_data: [10000000]u8 = undefined;
+                var cw = std.io.Writer.fixed(&chunk_data);
+                const chunk_writer = &cw;
 
-        try io.writeByte(chunk_writer, 8); // bits per block
-        try io.writeVarInt(chunk_writer, 2); // palette length
-        for ([_]i32{0b0000000100000, 0b0000000010000}) |p| {
-            try io.writeVarInt(chunk_writer, p); // palette entry
-        }
-        try io.writeVarInt(chunk_writer, 4096*8/64); // data length (number of longs)
-        try io.writeBytes(chunk_writer, &[_]u8{0x00} ** 4096); // data array (8 bits per block, 16x16x16 blocks)
-        try io.writeBytes(chunk_writer, &[_]u8{0x00} ** 2048); // block light (4 bits per block)
-        try io.writeBool(chunk_writer, true); // sky light optional
-        try io.writeBytes(chunk_writer, &[_]u8{0x00} ** 2048); // sky light (4 bits per block)
+                for (0..world.N_SUBCHUNKS) |chunk_y| {
+                    try io.writeByte(chunk_writer, 8); // bits per block
+                    try io.writeVarInt(chunk_writer, world.palette.len); // palette length
+                    for (world.palette) |p| {
+                        try io.writeVarInt(chunk_writer, p); // palette entry
+                    }
+                    try io.writeVarInt(chunk_writer, (4096 * 8) / 64); // data length (number of longs)
+                    for (0..world.N_BLOCKS) |local_y| {
+                        for (0..world.N_BLOCKS) |local_z| {
+                            for (0..world.N_BLOCKS) |local_x| {
+                                const global_x = chunk_x * world.N_BLOCKS + local_x;
+                                const global_y = chunk_y * world.N_BLOCKS + local_y;
+                                const global_z = chunk_z * world.N_BLOCKS + local_z;
+                                const block = world.getBlock(@intCast(global_x), @intCast(global_y), @intCast(global_z));
+                                try io.writeByte(chunk_writer, @intFromEnum(block)); // block data
+                            }
+                        }
+                    }
+                    try io.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // block light (4 bits per block)
+                    try io.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // sky light (4 bits per block)
+                }
 
-        for (0..16) |i| {
-            for (0..16) |j| {
-                try io.writeInt(res_writer, @as(i32, @intCast(i))-8); // chunk x
-                try io.writeInt(res_writer, @as(i32, @intCast(j))-8); // chunk z
+                try io.writeInt(res_writer, @as(i32, @intCast(chunk_x))); // chunk x
+                try io.writeInt(res_writer, @as(i32, @intCast(chunk_z))); // chunk z
                 try io.writeBool(res_writer, true); // ground up continuous
-                try io.writeVarInt(res_writer, 0b0000000000001000); // primary bit mask
-                try io.writeVarInt(res_writer, @intCast(chunk_writer.buffered().len + 1 + 256)); // data length
+                try io.writeVarInt(res_writer, 0xffff); // primary bit mask
+                try io.writeVarInt(res_writer, @intCast(chunk_writer.buffered().len + 256)); // data length
                 try io.writeBytes(res_writer, chunk_writer.buffered()); // data
-                try io.writeBool(res_writer, true); // biomes optional
                 try io.writeBytes(res_writer, &[_]u8{127} ** 256); // biomes
                 try io.writeVarInt(res_writer, 0); // number of block entities
                 try io.writePacket(tcp_writer, 0x20, res_writer.buffered());
@@ -230,6 +244,8 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const on_ground = try io.readBool(req_reader);
         std.log.info("position_update: x {}, y {}, z {}, on_ground {}", .{ x, y, z, on_ground });
 
+        player.updatePosition(x, y, z);
+
     } else if (state.* == State.Play and packet_id == 0x0e) {
         // position and look update
         const x = try io.readDouble(req_reader);
@@ -239,6 +255,8 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const pitch = try io.readFloat(req_reader);
         const on_ground = try io.readBool(req_reader);
         std.log.info("position_look_update: x {}, y {}, z {}, yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
+
+        player.updatePosition(x, y, z);
 
         // if (time - lastTeleportTime > 10000) {
         //     // update client
