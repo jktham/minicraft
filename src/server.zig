@@ -40,7 +40,7 @@ fn handleClient(client: net.Server.Connection) !void {
     var state: State = State.Handshaking;
 
     while (true) {
-        const packet_id, const data = readPacket(tcp_reader) catch |err| {
+        const packet_id, const data = io.readPacket(tcp_reader) catch |err| {
             if (err == error.EndOfStream) {
                 std.log.info("Client disconnected: {f}", .{client.address});
                 return;
@@ -50,25 +50,6 @@ fn handleClient(client: net.Server.Connection) !void {
         };
         try processPacket(tcp_writer, &state, packet_id, data);
     }
-}
-
-fn readPacket(tcp_reader: *std.io.Reader) !struct{u8, []u8} {
-    const length = try io.readVarInt(tcp_reader);
-    if (length == 0) {
-        return error.EmptyPacket;
-    }
-    const packet_id = try tcp_reader.takeByte();
-    const data = try tcp_reader.take(@intCast(length - 1)); // packet_id is 1 byte
-    std.log.debug("Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ length, packet_id, data, try sanitizeString(data) });
-    return .{packet_id, data};
-}
-
-fn writePacket(tcp_writer: *std.io.Writer, packet_id: u8, data: []const u8) !void {
-    try io.writeVarInt(tcp_writer, @intCast(data.len + 1));
-    try tcp_writer.writeByte(packet_id);
-    try tcp_writer.writeAll(data);
-    try tcp_writer.flush();
-    std.log.debug("Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ data.len + 1, packet_id, data, try sanitizeString(data) });
 }
 
 fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
@@ -123,7 +104,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
 
         // status response
         try io.writeString(res_writer, status);
-        try writePacket(tcp_writer, 0x00, res_writer.buffered());
+        try io.writePacket(tcp_writer, 0x00, res_writer.buffered());
 
     } else if (state.* == State.Status and packet_id == 0x01) {
         // ping request
@@ -132,7 +113,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
 
         // pong response
         try io.writeLong(res_writer, timestamp);
-        try writePacket(tcp_writer, 0x01, res_writer.buffered());
+        try io.writePacket(tcp_writer, 0x01, res_writer.buffered());
 
     } else if (state.* == State.Login and packet_id == 0x00) {
         // hello request
@@ -142,14 +123,14 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // login success response (skip encryption)
         try io.writeString(res_writer, "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"); // uuid
         try io.writeString(res_writer, name); // username
-        try writePacket(tcp_writer, 0x02, res_writer.buffered());
+        try io.writePacket(tcp_writer, 0x02, res_writer.buffered());
 
         setState(state, State.Play);
 
         // // disconnect
         // _ = res_writer.consumeAll();
         // try io.writeString(res_writer, "{\"text\": \">:)\"}");
-        // try writePacket(tcp_writer, 0x1A, res_writer.buffered());
+        // try io.writePacket(tcp_writer, 0x1A, res_writer.buffered());
 
         // join game
         _ = res_writer.consumeAll();
@@ -160,13 +141,13 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         try io.writeByte(res_writer, 0); // max players
         try io.writeString(res_writer, "flat"); // level type
         try io.writeBool(res_writer, false); // reduced debug info
-        try writePacket(tcp_writer, 0x23, res_writer.buffered());
+        try io.writePacket(tcp_writer, 0x23, res_writer.buffered());
 
         // spawn position
         _ = res_writer.consumeAll();
         try io.writeInt(res_writer, 0); // x
         try io.writeInt(res_writer, 0); // z
-        try writePacket(tcp_writer, 0x46, res_writer.buffered());
+        try io.writePacket(tcp_writer, 0x46, res_writer.buffered());
 
         // chunk data
         _ = res_writer.consumeAll();
@@ -175,10 +156,10 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         try io.writeBool(res_writer, true); // continuous
         try io.writeVarInt(res_writer, 0b1); // primary bit mask
         try io.writeVarInt(res_writer, 0 + 256); // data length
-        try res_writer.writeAll(&[_]u8{}); // data
-        try res_writer.writeAll(&[_]u8{0} ** 256); // biomes
+        try io.writeBytes(res_writer, &[_]u8{}); // data
+        try io.writeBytes(res_writer, &[_]u8{0} ** 256); // biomes
         try io.writeVarInt(res_writer, 0); // number of block entities
-        try writePacket(tcp_writer, 0x20, res_writer.buffered());
+        try io.writePacket(tcp_writer, 0x20, res_writer.buffered());
 
     } else if (state.* == State.Play and packet_id == 0x04) {
         // client settings
@@ -193,8 +174,8 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
     } else if (state.* == State.Play and packet_id == 0x09) {
         // plugin message
         const channel = try io.readString(req_reader);
-        const payload = try req_reader.allocRemaining(std.heap.page_allocator, std.io.Limit.unlimited);
-        std.log.info("plugin_message: channel {s}, payload 0x{x} ({s})", .{ channel, payload, payload });
+        const payload = try req_reader.allocRemaining(std.heap.page_allocator, std.io.Limit.unlimited); // unknown size
+        std.log.info("plugin_message: channel {s}, payload 0x{x} ({s})", .{ channel, payload, try io.sanitizeString(payload) });
 
     } else if (state.* == State.Play and packet_id == 0x0d) {
         // position update
@@ -229,16 +210,4 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
 fn setState(state: *State, newState: State) void {
     std.log.info("State change: {s} -> {s}", .{ @tagName(state.*), @tagName(newState) });
     state.* = newState;
-}
-
-fn sanitizeString(str: []const u8) ![]const u8 {
-    var sanitized = try std.heap.page_allocator.dupe(u8, str);
-    for (sanitized, 0..sanitized.len) |c, i| {
-        if (c >= 32 and c < 127) {
-            sanitized[i] = c;
-        } else {
-            sanitized[i] = '?';
-        }
-    }
-    return sanitized;
 }

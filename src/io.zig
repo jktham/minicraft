@@ -47,6 +47,45 @@ test "testByte" {
     }
 }
 
+pub fn readBytes(reader: *std.io.Reader, n: usize) ![]const u8 {
+    return try reader.take(n);
+}
+
+pub fn writeBytes(writer: *std.io.Writer, bytes: []const u8) !void {
+    try writer.writeAll(bytes);
+}
+
+test "testBytes" {
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_][]const u8{ &[_]u8{0}, &[_]u8{1, 2, 3}, &[_]u8{} };
+    for (values) |v| {
+        try writeBytes(&writer, v);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b00000000,
+        0b00000001, 0b00000010, 0b00000011,
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
+    }
+
+    for (values, 0..) |v, i| {
+        const read_value = try readBytes(&reader, v.len);
+        std.testing.expect(std.mem.eql(u8, read_value, v)) catch |err| {
+            print("read 0x{x}, expected 0x{x} at index {}\n", .{read_value, v, i});
+            return err;
+        };
+    }
+}
+
 pub fn readBool(reader: *std.io.Reader) !bool {
     const byte = try reader.takeByte();
     if (byte == 0) {
@@ -59,7 +98,7 @@ pub fn readBool(reader: *std.io.Reader) !bool {
 }
 
 pub fn writeBool(writer: *std.io.Writer, value: bool) !void {
-    try writer.writeByte(if (value) 1 else 0);
+    try writeByte(writer, if (value) 1 else 0);
 }
 
 test "testBool" {
@@ -127,7 +166,7 @@ pub fn writeVarInt(writer: *std.io.Writer, value: i32) !void {
         if (remaining != 0) {
             byte |= CONTINUE_MASK;
         }
-        try writer.writeByte(byte);
+        try writeByte(writer, byte);
 
         if (remaining == 0) {
             break;
@@ -172,7 +211,7 @@ test "testVarInt" {
         };
     }
 
-    try writer.writeAll(&[_]u8{0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b00000000}); // invalid VarInt (too long)
+    try writeBytes(&writer, &[_]u8{0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b00000000}); // invalid VarInt (too long)
     try writer.flush();
     try std.testing.expectError(error.InvalidVarInt, readVarInt(&reader));
 }
@@ -213,7 +252,7 @@ pub fn writeShort(writer: *std.io.Writer, short: i16) !void {
         @intCast((short >> 8) & 0xFF),
         @intCast(short & 0xFF),
     };
-    try writer.writeAll(&bytes);
+    try writeBytes(writer, &bytes);
 }
 
 test "testShort" {
@@ -267,7 +306,7 @@ pub fn writeInt(writer: *std.io.Writer, int: i32) !void {
         @intCast((int >> 8) & 0xFF),
         @intCast(int & 0xFF),
     };
-    try writer.writeAll(&bytes);
+    try writeBytes(writer, &bytes);
 }
 
 test "testInt" {
@@ -325,7 +364,7 @@ pub fn writeLong(writer: *std.io.Writer, long: i64) !void {
         @intCast((long >> 8) & 0xFF),
         @intCast(long & 0xFF),
     };
-    try writer.writeAll(&bytes);
+    try writeBytes(writer, &bytes);
 }
 
 test "testLong" {
@@ -380,7 +419,7 @@ pub fn writeFloat(writer: *std.io.Writer, value: f32) !void {
         @intCast((int >> 8) & 0xFF),
         @intCast(int & 0xFF),
     };
-    try writer.writeAll(&bytes);
+    try writeBytes(writer, &bytes);
 }
 
 test "testFloat" {
@@ -436,7 +475,7 @@ pub fn writeDouble(writer: *std.io.Writer, value: f64) !void {
         @intCast((long >> 8) & 0xFF),
         @intCast(long & 0xFF),
     };
-    try writer.writeAll(&bytes);
+    try writeBytes(writer, &bytes);
 }
 
 test "testDouble" {
@@ -499,7 +538,7 @@ pub fn writeUUID(writer: *std.io.Writer, uuid: u128) !void {
         @intCast((uuid >> 8) & 0xFF),
         @intCast(uuid & 0xFF),
     };
-    try writer.writeAll(&bytes);
+    try writeBytes(writer, &bytes);
 }
 
 test "testUUID" {
@@ -539,18 +578,18 @@ test "testUUID" {
     }
 }
 
-pub fn readString(reader: *std.io.Reader) ![]u8 {
+pub fn readString(reader: *std.io.Reader) ![]const u8 {
     const length = try readVarInt(reader);
     if (length < 0) {
         return error.InvalidStringLength;
     }
-    const string = try reader.take(@intCast(length));
+    const string = try readBytes(reader, @intCast(length));
     return string;
 }
 
 pub fn writeString(writer: *std.io.Writer, string: []const u8) !void {
     try writeVarInt(writer, @intCast(string.len));
-    try writer.writeAll(string);
+    try writeBytes(writer, string);
 }
 
 test "testString" {
@@ -558,7 +597,7 @@ test "testString" {
     var reader = std.io.Reader.fixed(&buf);
     var writer = std.io.Writer.fixed(&buf);
 
-    const values = [_][]const u8{ "Test", "a", "", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }; // 128*x
+    const values = [_][]const u8{ "Test", "a", "", "x" ** 128 };
     for (values) |v| {
         try writeString(&writer, v);
     }
@@ -570,6 +609,7 @@ test "testString" {
         0b00000001,
         'a',
         0b00000000,
+
         0b10000000, 0b00000001,
         'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x',
     };
@@ -608,4 +648,81 @@ test "testStringByteLength" {
             return err;
         };
     }
+}
+
+pub fn readPacket(reader: *std.io.Reader) !struct{u8, []const u8} {
+    const length = try readVarInt(reader);
+    if (length <= 0) {
+        return error.InvalidPacketLength;
+    }
+    const packet_id = try readByte(reader);
+    const data = try readBytes(reader, @intCast(length - 1)); // packet_id is 1 byte
+    std.log.debug("Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ length, packet_id, data, try sanitizeString(data) });
+    return .{packet_id, data};
+}
+
+pub fn writePacket(writer: *std.io.Writer, packet_id: u8, data: []const u8) !void {
+    try writeVarInt(writer, @intCast(data.len + 1));
+    try writeByte(writer, packet_id);
+    try writeBytes(writer, data);
+    try writer.flush();
+    std.log.debug("Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ data.len + 1, packet_id, data, try sanitizeString(data) });
+}
+
+test "testPacket" {
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]struct{u8, []const u8}{ .{0x01, "Test"}, .{0xff, ""}, .{0x10, &[_]u8{0x01, 0x02}} };
+    for (values) |v| {
+        try writePacket(&writer, v[0], v[1]);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b00000101,
+        0b00000001,
+        'T', 'e', 's', 't',
+        0b00000001,
+        0b11111111,
+
+        0b00000011,
+        0b00010000,
+        0b00000001, 0b00000010,
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
+    }
+
+    for (values, 0..) |v, i| {
+        const read_value = try readPacket(&reader);
+        std.testing.expect(read_value[0] == v[0]) catch |err| {
+            print("read 0x{x:0>2}, expected 0x{x:0>2} at index {}\n", .{read_value[0], v[0], i});
+            return err;
+        };
+        std.testing.expect(std.mem.eql(u8, read_value[1], v[1])) catch |err| {
+            print("read 0x{x}, expected 0x{x} at index {}\n", .{read_value[1], v[1], i});
+            return err;
+        };
+    }
+
+    try writeVarInt(&writer, 0); // invalid length
+    try writer.flush();
+    try std.testing.expectError(error.InvalidPacketLength, readPacket(&reader));
+}
+
+pub fn sanitizeString(str: []const u8) ![]const u8 {
+    var sanitized = try std.heap.page_allocator.dupe(u8, str);
+    for (sanitized, 0..sanitized.len) |c, i| {
+        if (c >= 32 and c < 127) {
+            sanitized[i] = c;
+        } else {
+            sanitized[i] = '?';
+        }
+    }
+    return sanitized;
 }
