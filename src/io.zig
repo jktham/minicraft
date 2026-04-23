@@ -154,6 +154,7 @@ pub fn readVarInt(reader: *std.io.Reader) !i32 {
     return @bitCast(value);
 }
 
+// param type i32 guarantees valid VarInt encoding, so no need to check for overflow when writing
 pub fn writeVarInt(writer: *std.io.Writer, value: i32) !void {
     const CONTINUE_MASK: u8 = 0b10000000;
     const DATA_MASK: u8 = 0b01111111;
@@ -661,6 +662,7 @@ pub fn readPacket(reader: *std.io.Reader) !struct{u8, []const u8} {
     return .{packet_id, data};
 }
 
+// write packet and flush
 pub fn writePacket(writer: *std.io.Writer, packet_id: u8, data: []const u8) !void {
     try writeVarInt(writer, @intCast(data.len + 1));
     try writeByte(writer, packet_id);
@@ -715,6 +717,7 @@ test "testPacket" {
     try std.testing.expectError(error.InvalidPacketLength, readPacket(&reader));
 }
 
+// replace non-printable characters in a string for logging purposes
 pub fn sanitizeString(str: []const u8) ![]const u8 {
     var sanitized = try std.heap.page_allocator.dupe(u8, str);
     for (sanitized, 0..sanitized.len) |c, i| {

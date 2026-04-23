@@ -52,13 +52,25 @@ fn handleClient(client: net.Server.Connection) !void {
     }
 }
 
+var lastKeepAlive: i64 = 0;
+
 fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
     var r = std.io.Reader.fixed(req_data);
     const req_reader = &r;
 
-    var res_data: [10000]u8 = undefined;
+    var res_data: [100000]u8 = undefined;
     var w = std.io.Writer.fixed(&res_data);
     const res_writer = &w;
+
+    const time = std.time.milliTimestamp();
+    if (state.* == State.Play and time - lastKeepAlive > 10000) {
+        // keep alive
+        lastKeepAlive = time;
+        try io.writeLong(res_writer, time); // id
+        try io.writePacket(tcp_writer, 0x1f, res_writer.buffered());
+        _ = res_writer.consumeAll();
+        std.log.info("Sent keep alive", .{});
+    }
 
     if (state.* == State.Handshaking and packet_id == 0x00) {
         // handshake request
@@ -105,6 +117,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // status response
         try io.writeString(res_writer, status);
         try io.writePacket(tcp_writer, 0x00, res_writer.buffered());
+        _ = res_writer.consumeAll();
 
     } else if (state.* == State.Status and packet_id == 0x01) {
         // ping request
@@ -114,6 +127,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // pong response
         try io.writeLong(res_writer, timestamp);
         try io.writePacket(tcp_writer, 0x01, res_writer.buffered());
+        _ = res_writer.consumeAll();
 
     } else if (state.* == State.Login and packet_id == 0x00) {
         // hello request
@@ -124,16 +138,21 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         try io.writeString(res_writer, "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"); // uuid
         try io.writeString(res_writer, name); // username
         try io.writePacket(tcp_writer, 0x02, res_writer.buffered());
+        _ = res_writer.consumeAll();
 
         setState(state, State.Play);
 
         // // disconnect
-        // _ = res_writer.consumeAll();
         // try io.writeString(res_writer, "{\"text\": \">:)\"}");
         // try io.writePacket(tcp_writer, 0x1A, res_writer.buffered());
+        // _ = res_writer.consumeAll();
+
+        // spawn position
+        try io.writeLong(res_writer, 0x0000000000000000);
+        try io.writePacket(tcp_writer, 0x46, res_writer.buffered());
+        _ = res_writer.consumeAll();
 
         // join game
-        _ = res_writer.consumeAll();
         try io.writeInt(res_writer, 0); // entity id
         try io.writeByte(res_writer, 1); // gamemode
         try io.writeInt(res_writer, 0); // dimension
@@ -142,24 +161,50 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         try io.writeString(res_writer, "flat"); // level type
         try io.writeBool(res_writer, false); // reduced debug info
         try io.writePacket(tcp_writer, 0x23, res_writer.buffered());
-
-        // spawn position
         _ = res_writer.consumeAll();
-        try io.writeInt(res_writer, 0); // x
-        try io.writeInt(res_writer, 0); // z
-        try io.writePacket(tcp_writer, 0x46, res_writer.buffered());
+
+        // update client position (ends loading screen)
+        try io.writeDouble(res_writer, 0);
+        try io.writeDouble(res_writer, 0);
+        try io.writeDouble(res_writer, 0);
+        try io.writeFloat(res_writer, 0);
+        try io.writeFloat(res_writer, 0);
+        try io.writeByte(res_writer, 0b00011111); // flags (relative)
+        try io.writeVarInt(res_writer, @truncate(time & 0x7FFFFFFF)); // teleport id
+        try io.writePacket(tcp_writer, 0x2f, res_writer.buffered());
+        _ = res_writer.consumeAll();
 
         // chunk data
-        _ = res_writer.consumeAll();
-        try io.writeInt(res_writer, 0); // chunk x
-        try io.writeInt(res_writer, 0); // chunk z
-        try io.writeBool(res_writer, true); // continuous
-        try io.writeVarInt(res_writer, 0b1); // primary bit mask
-        try io.writeVarInt(res_writer, 0 + 256); // data length
-        try io.writeBytes(res_writer, &[_]u8{}); // data
-        try io.writeBytes(res_writer, &[_]u8{0} ** 256); // biomes
-        try io.writeVarInt(res_writer, 0); // number of block entities
-        try io.writePacket(tcp_writer, 0x20, res_writer.buffered());
+        var chunk_data: [10000]u8 = undefined;
+        var cw = std.io.Writer.fixed(&chunk_data);
+        const chunk_writer = &cw;
+
+        try io.writeByte(chunk_writer, 8); // bits per block
+        try io.writeVarInt(chunk_writer, 2); // palette length
+        for ([_]i32{0b0000000100000, 0b0000000010000}) |p| {
+            try io.writeVarInt(chunk_writer, p); // palette entry
+        }
+        try io.writeVarInt(chunk_writer, 4096*8/64); // data length (number of longs)
+        try io.writeBytes(chunk_writer, &[_]u8{0x00} ** 4096); // data array (8 bits per block, 16x16x16 blocks)
+        try io.writeBytes(chunk_writer, &[_]u8{0x00} ** 2048); // block light (4 bits per block)
+        try io.writeBool(chunk_writer, true); // sky light optional
+        try io.writeBytes(chunk_writer, &[_]u8{0x00} ** 2048); // sky light (4 bits per block)
+
+        for (0..16) |i| {
+            for (0..16) |j| {
+                try io.writeInt(res_writer, @as(i32, @intCast(i))-8); // chunk x
+                try io.writeInt(res_writer, @as(i32, @intCast(j))-8); // chunk z
+                try io.writeBool(res_writer, true); // ground up continuous
+                try io.writeVarInt(res_writer, 0b0000000000001000); // primary bit mask
+                try io.writeVarInt(res_writer, @intCast(chunk_writer.buffered().len + 1 + 256)); // data length
+                try io.writeBytes(res_writer, chunk_writer.buffered()); // data
+                try io.writeBool(res_writer, true); // biomes optional
+                try io.writeBytes(res_writer, &[_]u8{127} ** 256); // biomes
+                try io.writeVarInt(res_writer, 0); // number of block entities
+                try io.writePacket(tcp_writer, 0x20, res_writer.buffered());
+                _ = res_writer.consumeAll();
+            }
+        }
 
     } else if (state.* == State.Play and packet_id == 0x04) {
         // client settings
@@ -195,6 +240,19 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const on_ground = try io.readBool(req_reader);
         std.log.info("position_look_update: x {}, y {}, z {}, yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
+        // if (time - lastTeleportTime > 10000) {
+        //     // update client
+        //     try io.writeDouble(res_writer, x);
+        //     try io.writeDouble(res_writer, y);
+        //     try io.writeDouble(res_writer, z);
+        //     try io.writeFloat(res_writer, yaw);
+        //     try io.writeFloat(res_writer, pitch);
+        //     try io.writeByte(res_writer, 0); // flags
+        //     try io.writeVarInt(res_writer, @truncate(time & 0x7FFFFFFF)); // teleport id
+        //     try io.writePacket(tcp_writer, 0x2f, res_writer.buffered());
+        //     lastTeleportTime = time;
+        // }
+
     } else if (state.* == State.Play and packet_id == 0x0f) {
         // look update
         const yaw = try io.readFloat(req_reader);
@@ -202,8 +260,18 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const on_ground = try io.readBool(req_reader);
         std.log.info("look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
 
+    } else if (state.* == State.Play and packet_id == 0x00) {
+        // teleport confirm
+        const teleport_id = try io.readVarInt(req_reader);
+        std.log.info("teleport_confirm: id {}", .{teleport_id});
+
+    } else if (state.* == State.Play and packet_id == 0x0b) {
+        // keep alive
+        const id = try io.readLong(req_reader);
+        std.log.info("keep_alive: id {}", .{id});
+
     } else {
-        std.log.info("unknown packet id 0x{x:0>2} in state {s}", .{ packet_id, @tagName(state.*) });
+        std.log.warn("unknown packet id 0x{x:0>2} in state {s}", .{ packet_id, @tagName(state.*) });
     }
 }
 
