@@ -93,29 +93,12 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // status request
         std.log.info("status_request", .{});
 
-        const status =
-            \\{
-            \\    "version": {
-            \\        "name": "1.12.2",
-            \\        "protocol": 340
-            \\    },
-            \\    "players": {
-            \\        "max": 20,
-            \\        "online": 1,
-            \\        "sample": [
-            \\            {
-            \\                "name": "goob",
-            \\                "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20"
-            \\            }
-            \\        ]
-            \\    },
-            \\    "description": {
-            \\        "text": "<3"
-            \\    },
-            \\    "favicon": "data:image/png;base64,<data>",
-            \\    "enforcesSecureChat": false
-            \\}
-        ;
+        var file = try std.fs.cwd().openFile("res/status.json", .{});
+        defer file.close();
+
+        const allocator = std.heap.page_allocator;
+        const status = try file.readToEndAlloc(allocator, 100000);
+        defer allocator.free(status);
 
         // status response
         try io.writeString(res_writer, status);
@@ -178,10 +161,10 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         try io.writePacket(tcp_writer, 0x2f, res_writer.buffered());
         _ = res_writer.consumeAll();
 
+        // chunk data
         std.log.info("chunk_data", .{});
         for (0..world.N_CHUNKS) |chunk_x| {
             for (0..world.N_CHUNKS) |chunk_z| {
-                // chunk data
                 var chunk_data: [10000000]u8 = undefined;
                 var cw = std.io.Writer.fixed(&chunk_data);
                 const chunk_writer = &cw;
@@ -258,19 +241,6 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         std.log.info("position_look_update: x {}, y {}, z {}, yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
         player.updatePosition(x, y, z);
-
-        // if (time - lastTeleportTime > 10000) {
-        //     // update client
-        //     try io.writeDouble(res_writer, x);
-        //     try io.writeDouble(res_writer, y);
-        //     try io.writeDouble(res_writer, z);
-        //     try io.writeFloat(res_writer, yaw);
-        //     try io.writeFloat(res_writer, pitch);
-        //     try io.writeByte(res_writer, 0); // flags
-        //     try io.writeVarInt(res_writer, @truncate(time & 0x7FFFFFFF)); // teleport id
-        //     try io.writePacket(tcp_writer, 0x2f, res_writer.buffered());
-        //     lastTeleportTime = time;
-        // }
 
     } else if (state.* == State.Play and packet_id == 0x0f) {
         // look update

@@ -669,7 +669,7 @@ pub fn writePacket(writer: *std.io.Writer, packet_id: u8, data: []const u8) !voi
     try writeBytes(writer, data);
     try writer.flush();
 
-    if (packet_id == 0x20) { // too large to print, stdout slow
+    if (data.len > 10000) { // too large to print, stdout slow
         std.log.debug("Sent large packet: length {d}, id 0x{x:0>2}", .{ data.len + 1, packet_id });
     } else {
         std.log.debug("Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ data.len + 1, packet_id, data, try sanitizeString(data) });
