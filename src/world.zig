@@ -1,10 +1,11 @@
 const std = @import("std");
 
 // blockid(9) + meta(4)
-pub const palette: [3]i32 = .{
+pub const palette = [_]i32{
     0b000000000_0000, // air
     0b000000010_0000, // grass
     0b000000001_0000, // stone
+    0b000000111_0000, // bedrock
 };
 
 // index into palette
@@ -12,6 +13,7 @@ pub const Block = enum(u8) {
     Air = 0,
     Grass = 1,
     Stone = 2,
+    Bedrock = 3,
 };
 
 pub const N_CHUNKS = 3; // number of chunks in each direction (x and z)
@@ -19,7 +21,7 @@ pub const N_SUBCHUNKS = 16; // number of subchunks per column (y direction)
 pub const N_BLOCKS = 16; // number of blocks in each direction within a subchunk
 pub var chunks: [N_CHUNKS][N_SUBCHUNKS][N_CHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]u8 = undefined;
 
-pub fn init() void {
+pub fn generate() void {
     for (0..N_CHUNKS) |chunk_x| {
         for (0..N_SUBCHUNKS) |chunk_y| {
             for (0..N_CHUNKS) |chunk_z| {
@@ -32,6 +34,8 @@ pub fn init() void {
 
                             if (global_y == 8) {
                                 setBlock(@intCast(global_x), @intCast(global_y), @intCast(global_z), Block.Grass);
+                            } else if (global_y == 0) {
+                                setBlock(@intCast(global_x), @intCast(global_y), @intCast(global_z), Block.Bedrock);
                             } else if (global_y < 8) {
                                 setBlock(@intCast(global_x), @intCast(global_y), @intCast(global_z), Block.Stone);
                             } else {

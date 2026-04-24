@@ -19,7 +19,7 @@ pub fn startServer() !void {
     });
     defer server.deinit();
 
-    world.init();
+    world.generate();
 
     std.log.info("Listening on {f}", .{server.listen_address});
     while (true) {
@@ -150,29 +150,30 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // try io.writePacket(tcp_writer, 0x1A, res_writer.buffered());
         // _ = res_writer.consumeAll();
 
-        // spawn position
-        try io.writeLong(res_writer, 0x0000000000000000);
+        // set spawn position (does not work)
+        try io.writeLong(res_writer, 0x00000000F000000F);
         try io.writePacket(tcp_writer, 0x46, res_writer.buffered());
         _ = res_writer.consumeAll();
 
         // join game
-        try io.writeInt(res_writer, 0); // entity id
-        try io.writeByte(res_writer, 1); // gamemode
+        try io.writeInt(res_writer, 0x10); // entity id
+        try io.writeByte(res_writer, 0); // gamemode
         try io.writeInt(res_writer, 0); // dimension
-        try io.writeByte(res_writer, 0); // difficulty
+        try io.writeByte(res_writer, 2); // difficulty
         try io.writeByte(res_writer, 0); // max players
-        try io.writeString(res_writer, "flat"); // level type
+        try io.writeString(res_writer, "default"); // level type
         try io.writeBool(res_writer, false); // reduced debug info
         try io.writePacket(tcp_writer, 0x23, res_writer.buffered());
         _ = res_writer.consumeAll();
 
         // update client position (ends loading screen)
-        try io.writeDouble(res_writer, 0);
-        try io.writeDouble(res_writer, 0);
-        try io.writeDouble(res_writer, 0);
-        try io.writeFloat(res_writer, 0);
-        try io.writeFloat(res_writer, 0);
-        try io.writeByte(res_writer, 0b00011111); // flags (relative)
+        const center = @as(f32, world.N_CHUNKS * world.N_BLOCKS) / 2.0;
+        try io.writeDouble(res_writer, center); // x
+        try io.writeDouble(res_writer, 20); // y
+        try io.writeDouble(res_writer, center); // z
+        try io.writeFloat(res_writer, 0); // yaw
+        try io.writeFloat(res_writer, 0); // pitch
+        try io.writeByte(res_writer, 0b00000000); // flags (relative)
         try io.writeVarInt(res_writer, @truncate(time & 0x7FFFFFFF)); // teleport id
         try io.writePacket(tcp_writer, 0x2f, res_writer.buffered());
         _ = res_writer.consumeAll();
