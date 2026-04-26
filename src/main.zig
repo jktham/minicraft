@@ -10,12 +10,25 @@ pub const std_options: std.Options = .{
     // .log_level = std.log.Level.debug,
 };
 
+pub const muted_keywords = [_][]const u8{
+    "length 2, id 0x1d, data 0x00",
+    "player_animation",
+};
+
 pub fn colorLogFn(
     comptime message_level: std.log.Level,
     comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
+    const message_str = std.fmt.allocPrint(std.heap.page_allocator, format, args) catch return;
+    defer std.heap.page_allocator.free(message_str);
+    for (muted_keywords) |keyword| {
+        if (std.mem.containsAtLeast(u8, message_str, 1, keyword)) {
+            return;
+        }
+    }
+
     const color = switch (message_level) {
         .err => "\x1b[31m", // red
         .warn => "\x1b[33m", // yellow

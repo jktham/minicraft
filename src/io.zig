@@ -734,3 +734,64 @@ pub fn sanitizeString(str: []const u8) ![]const u8 {
     }
     return sanitized;
 }
+
+// note: position encoding different from modern versions, xyz vs xzy
+pub fn readPosition(reader: *std.io.Reader) !struct {i26, i12, i26} {
+    const bytes = try reader.take(8);
+    const long: i64 = @as(i64, bytes[0]) << 56 | @as(i64, bytes[1]) << 48 | @as(i64, bytes[2]) << 40 | @as(i64, bytes[3]) << 32 | @as(i64, bytes[4]) << 24 | @as(i64, bytes[5]) << 16 | @as(i64, bytes[6]) << 8 | @as(i64, bytes[7]);
+    return .{
+        @truncate((long >> 38) & 0x3FFFFFF),
+        @truncate((long >> 26) & 0xFFF),
+        @truncate(long & 0x3FFFFFF),
+    };
+}
+
+pub fn writePosition(writer: *std.io.Writer, x: i26, y: i12, z: i26) !void {
+    const long: i64 = ((@as(i64, x) & 0x3FFFFFF) << 38) | ((@as(i64, y) & 0xFFF) << 26) | (@as(i64, z) & 0x3FFFFFF);
+    const bytes: [8]u8 = .{
+        @intCast((long >> 56) & 0xFF),
+        @intCast((long >> 48) & 0xFF),
+        @intCast((long >> 40) & 0xFF),
+        @intCast((long >> 32) & 0xFF),
+        @intCast((long >> 24) & 0xFF),
+        @intCast((long >> 16) & 0xFF),
+        @intCast((long >> 8) & 0xFF),
+        @intCast(long & 0xFF),
+    };
+    try writeBytes(writer, &bytes);
+}
+
+test "testPosition" {
+    var buf: [1000]u8 = undefined;
+    var reader = std.io.Reader.fixed(&buf);
+    var writer = std.io.Writer.fixed(&buf);
+
+    const values = [_]struct {i26, i12, i26}{ .{ 0, 0, 0 }, .{ 1, 2, 3 }, .{ 255, 255, 255 }, .{ -1, -2, -3 }, .{ std.math.maxInt(i26), std.math.maxInt(i12), std.math.maxInt(i26) }, .{ std.math.minInt(i26), std.math.minInt(i12), std.math.minInt(i26) } };
+    for (values) |v| {
+        try writePosition(&writer, v[0], v[1], v[2]);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        0b00000000, 0b00000000, 0b00000000, 0b01000000, 0b00001000, 0b00000000, 0b00000000, 0b00000011,
+        0b00000000, 0b00000000, 0b00111111, 0b11000011, 0b11111100, 0b00000000, 0b00000000, 0b11111111,
+        0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111011, 0b11111111, 0b11111111, 0b11111101,
+        0b01111111, 0b11111111, 0b11111111, 0b11011111, 0b11111101, 0b11111111, 0b11111111, 0b11111111,
+        0b10000000, 0b00000000, 0b00000000, 0b00100000, 0b00000010, 0b00000000, 0b00000000, 0b00000000,
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
+    }
+
+    for (values, 0..) |v, i| {
+        const read_value = try readPosition(&reader);
+        std.testing.expect(std.mem.eql(i64, &read_value, &v)) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
+    }
+}

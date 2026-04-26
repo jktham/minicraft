@@ -134,7 +134,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // _ = res_writer.consumeAll();
 
         // set spawn position (does not work)
-        try io.writeLong(res_writer, 0x00000000F000000F);
+        try io.writePosition(res_writer, 0, 64, 0); // x, y, z
         try io.writePacket(tcp_writer, 0x46, res_writer.buffered());
         _ = res_writer.consumeAll();
 
@@ -220,13 +220,18 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const payload = try req_reader.allocRemaining(std.heap.page_allocator, std.io.Limit.unlimited); // unknown size
         std.log.info("plugin_message: channel {s}, payload 0x{x} ({s})", .{ channel, payload, try io.sanitizeString(payload) });
 
+    } else if (state.* == State.Play and packet_id == 0x0c) {
+        // player update
+        const on_ground = try io.readBool(req_reader);
+        std.log.info("player_update: on_ground {}", .{ on_ground });
+
     } else if (state.* == State.Play and packet_id == 0x0d) {
         // position update
         const x = try io.readDouble(req_reader);
         const y = try io.readDouble(req_reader);
         const z = try io.readDouble(req_reader);
         const on_ground = try io.readBool(req_reader);
-        std.log.info("position_update: x {}, y {}, z {}, on_ground {}", .{ x, y, z, on_ground });
+        std.log.info("position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
         player.updatePosition(x, y, z);
 
@@ -238,7 +243,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const yaw = try io.readFloat(req_reader);
         const pitch = try io.readFloat(req_reader);
         const on_ground = try io.readBool(req_reader);
-        std.log.info("position_look_update: x {}, y {}, z {}, yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
+        std.log.info("position_look_update: position ({}, {}, {}), yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
         player.updatePosition(x, y, z);
 
@@ -258,6 +263,40 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // keep alive
         const id = try io.readLong(req_reader);
         std.log.info("keep_alive: id {}", .{id});
+
+    } else if (state.* == State.Play and packet_id == 0x14) {
+        // player digging
+        const status = try io.readVarInt(req_reader);
+        const x, const y, const z = try io.readPosition(req_reader);
+        const face = try io.readByte(req_reader);
+        std.log.info("player_digging: status {}, position ({}, {}, {}), face {}", .{ status, x, y, z, face });
+
+    } else if (state.* == State.Play and packet_id == 0x1f) {
+        // player block placement
+        const x, const y, const z = try io.readPosition(req_reader);
+        const face = try io.readVarInt(req_reader);
+        const hand = try io.readVarInt(req_reader);
+        const cursor_x = try io.readFloat(req_reader);
+        const cursor_y = try io.readFloat(req_reader);
+        const cursor_z = try io.readFloat(req_reader);
+        std.log.info("player_block_placement: position ({}, {}, {}), face {}, hand {}, cursor ({}, {}, {})", .{ x, y, z, face, hand, cursor_x, cursor_y, cursor_z });
+
+    } else if (state.* == State.Play and packet_id == 0x1d) {
+        // player animation
+        const hand = try io.readVarInt(req_reader);
+        std.log.info("player_animation: hand {}", .{hand});
+
+    } else if (state.* == State.Play and packet_id == 0x1a) {
+        // player slot selection
+        const slot = try io.readShort(req_reader);
+        std.log.info("player_slot_selection: slot {}", .{slot});
+
+    } else if (state.* == State.Play and packet_id == 0x15) {
+        // entity action
+        const entity_id = try io.readVarInt(req_reader);
+        const action_id = try io.readVarInt(req_reader);
+        const jump_boost = try io.readVarInt(req_reader);
+        std.log.info("entity_action: entity_id {}, action_id {}, jump_boost {}", .{ entity_id, action_id, jump_boost });
 
     } else {
         std.log.warn("unknown packet id 0x{x:0>2} in state {s}", .{ packet_id, @tagName(state.*) });
