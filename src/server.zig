@@ -110,6 +110,8 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const timestamp = try io.readLong(req_reader);
         std.log.info("ping_request: timestamp {d}", .{timestamp});
 
+        player.ping = @truncate((time - timestamp) * 2);
+
         // pong response
         try io.writeLong(res_writer, timestamp);
         try io.writePacket(tcp_writer, 0x01, res_writer.buffered());
@@ -120,9 +122,11 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const name = try io.readString(req_reader);
         std.log.info("hello: name {s}", .{name});
 
+        player.name = name;
+        player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
         // login success response (skip encryption)
         try io.writeString(res_writer, "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"); // uuid
-        try io.writeString(res_writer, name); // username
+        try io.writeString(res_writer, player.name); // username
         try io.writePacket(tcp_writer, 0x02, res_writer.buffered());
         _ = res_writer.consumeAll();
 
@@ -148,6 +152,18 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         try io.writeString(res_writer, "default"); // level type
         try io.writeBool(res_writer, false); // reduced debug info
         try io.writePacket(tcp_writer, 0x23, res_writer.buffered());
+        _ = res_writer.consumeAll();
+
+        // update player list
+        try io.writeVarInt(res_writer, 0); // action: add
+        try io.writeVarInt(res_writer, 1); // number of players
+        try io.writeUUID(res_writer, player.uuid); // player uuid
+        try io.writeString(res_writer, player.name); // player name
+        try io.writeVarInt(res_writer, 0); // properties
+        try io.writeVarInt(res_writer, player.gamemode); // gamemode
+        try io.writeVarInt(res_writer, player.ping); // ping
+        try io.writeBool(res_writer, false); // has display name
+        try io.writePacket(tcp_writer, 0x2e, res_writer.buffered());
         _ = res_writer.consumeAll();
 
         // update client position (ends loading screen)
@@ -224,7 +240,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const on_ground = try io.readBool(req_reader);
         std.log.info("position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
-        player.updatePosition(x, y, z);
+        player.position = [3]f64{ x, y, z };
 
     } else if (state.* == State.Play and packet_id == 0x0e) {
         // position and look update
@@ -236,7 +252,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const on_ground = try io.readBool(req_reader);
         std.log.info("position_look_update: position ({}, {}, {}), yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
-        player.updatePosition(x, y, z);
+        player.position = [3]f64{ x, y, z };
 
     } else if (state.* == State.Play and packet_id == 0x0f) {
         // look update

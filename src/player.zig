@@ -1,10 +1,7 @@
 const std = @import("std");
 
+pub var ping: i32 = undefined;
+pub var name: []const u8 = undefined;
+pub var uuid: u128 = undefined;
 pub var position: [3]f64 = undefined;
 pub var gamemode: u8 = 0; // 0 = survival, 1 = creative
-
-pub fn updatePosition(x: f64, y: f64, z: f64) void {
-    position[0] = x;
-    position[1] = y;
-    position[2] = z;
-}
