@@ -19,7 +19,7 @@ pub fn startServer() !void {
     });
     defer server.deinit();
 
-    world.generate();
+    try world.generate();
 
     std.log.info("Listening on {f}", .{server.listen_address});
     while (true) {
@@ -133,14 +133,15 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // try io.writePacket(tcp_writer, 0x1A, res_writer.buffered());
         // _ = res_writer.consumeAll();
 
-        // set spawn position (does not work)
+        // set spawn position (does not work idk)
         try io.writePosition(res_writer, 0, 64, 0); // x, y, z
         try io.writePacket(tcp_writer, 0x46, res_writer.buffered());
         _ = res_writer.consumeAll();
 
         // join game
+        player.gamemode = 1; // creative
         try io.writeInt(res_writer, 0x10); // entity id
-        try io.writeByte(res_writer, 0); // gamemode
+        try io.writeByte(res_writer, player.gamemode); // gamemode
         try io.writeInt(res_writer, 0); // dimension
         try io.writeByte(res_writer, 2); // difficulty
         try io.writeByte(res_writer, 0); // max players
@@ -176,17 +177,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
                         try io.writeVarInt(chunk_writer, p); // palette entry
                     }
                     try io.writeVarInt(chunk_writer, (4096 * 8) / 64); // data length (number of longs)
-                    for (0..world.N_BLOCKS) |local_y| {
-                        for (0..world.N_BLOCKS) |local_z| {
-                            for (0..world.N_BLOCKS) |local_x| {
-                                const global_x = chunk_x * world.N_BLOCKS + local_x;
-                                const global_y = chunk_y * world.N_BLOCKS + local_y;
-                                const global_z = chunk_z * world.N_BLOCKS + local_z;
-                                const block = world.getBlock(@intCast(global_x), @intCast(global_y), @intCast(global_z));
-                                try io.writeByte(chunk_writer, @intFromEnum(block)); // block data
-                            }
-                        }
-                    }
+                    try io.writeBytes(chunk_writer, try world.getChunkPointer(@intCast(chunk_x), @intCast(chunk_y), @intCast(chunk_z))); // block data (4096 blocks per subchunk)
                     try io.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // block light (4 bits per block)
                     try io.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // sky light (4 bits per block)
                 }
@@ -270,6 +261,21 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const x, const y, const z = try io.readPosition(req_reader);
         const face = try io.readByte(req_reader);
         std.log.info("player_digging: status {}, position ({}, {}, {}), face {}", .{ status, x, y, z, face });
+
+        if (player.gamemode == 1 and status == 0 or player.gamemode == 0 and status == 2) {
+            // finish digging, set block to air
+            try world.setBlock(@intCast(x), @intCast(y), @intCast(z), world.Block.Air);
+
+            // spawn xp orb
+            try io.writeVarInt(res_writer, std.crypto.random.int(i32)); // entity id
+            try io.writeDouble(res_writer, @floatFromInt(x)); // x
+            try io.writeDouble(res_writer, @floatFromInt(y)); // y
+            try io.writeDouble(res_writer, @floatFromInt(z)); // z
+            try io.writeShort(res_writer, 10); // count
+            try io.writePacket(tcp_writer, 0x01, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+        }
 
     } else if (state.* == State.Play and packet_id == 0x1f) {
         // player block placement
