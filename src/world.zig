@@ -24,11 +24,12 @@ pub const N_BLOCKS = 16; // number of blocks in each direction within a subchunk
 pub var chunks: [N_CHUNKS][N_CHUNKS][N_SUBCHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]u8 = undefined;
 
 pub fn generate() !void {
+    std.log.info("Generating world...", .{});
     for (0..N_CHUNKS) |chunk_x| {
-        for (0..N_SUBCHUNKS) |chunk_y| {
-            for (0..N_CHUNKS) |chunk_z| {
-                for (0..N_BLOCKS) |local_x| {
-                    for (0..N_BLOCKS) |local_y| {
+        for (0..N_CHUNKS) |chunk_z| {
+            for (0..N_SUBCHUNKS) |chunk_y| {
+                for (0..N_BLOCKS) |local_y| {
+                    for (0..N_BLOCKS) |local_x| {
                         for (0..N_BLOCKS) |local_z| {
                             const global_x: i32 = @intCast(chunk_x * N_BLOCKS + local_x);
                             const global_y: i32 = @intCast(chunk_y * N_BLOCKS + local_y);

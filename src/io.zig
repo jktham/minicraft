@@ -579,6 +579,12 @@ test "testUUID" {
     }
 }
 
+// string representration with dashes, sometimes used
+pub fn UUIDtoString(uuid: u128) ![]const u8 {
+    const str = try std.fmt.allocPrint(std.heap.page_allocator, "{x:0>8}-{x:0>4}-{x:0>4}-{x:0>4}-{x:0>12}", .{uuid >> 96, (uuid >> 80) & 0xFFFF, (uuid >> 64) & 0xFFFF, (uuid >> 48) & 0xFFFF, uuid & 0xFFFFFFFFFFFF });
+    return str; // memory leak but whatever
+}
+
 pub fn readString(reader: *std.io.Reader) ![]const u8 {
     const length = try readVarInt(reader);
     if (length < 0) {

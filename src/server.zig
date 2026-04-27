@@ -125,7 +125,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         player.name = name;
         player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
         // login success response (skip encryption)
-        try io.writeString(res_writer, "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"); // uuid
+        try io.writeString(res_writer, try io.UUIDtoString(player.uuid)); // uuid as string
         try io.writeString(res_writer, player.name); // username
         try io.writePacket(tcp_writer, 0x02, res_writer.buffered());
         _ = res_writer.consumeAll();
@@ -143,8 +143,8 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         _ = res_writer.consumeAll();
 
         // join game
-        player.gamemode = 1; // creative
-        try io.writeInt(res_writer, 0x10); // entity id
+        player.gamemode = 0; // creative
+        try io.writeInt(res_writer, 0xbeef); // entity id
         try io.writeByte(res_writer, player.gamemode); // gamemode
         try io.writeInt(res_writer, 0); // dimension
         try io.writeByte(res_writer, 2); // difficulty
@@ -307,6 +307,14 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // player animation
         const hand = try io.readVarInt(req_reader);
         std.log.info("player_animation: hand {}", .{hand});
+
+        // // jump
+        // try io.writeVarInt(res_writer, 0xbeef); // entity id
+        // try io.writeShort(res_writer, 0); // velocity x
+        // try io.writeShort(res_writer, 10000); // velocity y
+        // try io.writeShort(res_writer, 0); // velocity z
+        // try io.writePacket(tcp_writer, 0x3e, res_writer.buffered());
+        // _ = res_writer.consumeAll();
 
     } else if (state.* == State.Play and packet_id == 0x1a) {
         // player slot selection
