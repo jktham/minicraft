@@ -4,6 +4,9 @@ const io = @import("io.zig");
 const player = @import("player.zig");
 const world = @import("world.zig");
 
+// 1.12.2 protocol: https://minecraft.wiki/w/Protocol?oldid=2772385, https://c4k3.github.io/wiki.vg/Protocol.html
+// 1.12.2 block/item/entity ids: https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
+
 const State = enum {
     Handshaking,
     Status,
@@ -137,14 +140,15 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // try io.writePacket(tcp_writer, 0x1A, res_writer.buffered());
         // _ = res_writer.consumeAll();
 
-        // set spawn position (does not work idk)
+        // set spawn position (doesnt work idk)
         try io.writePosition(res_writer, 0, 64, 0); // x, y, z
         try io.writePacket(tcp_writer, 0x46, res_writer.buffered());
         _ = res_writer.consumeAll();
 
         // join game
         player.gamemode = 0; // creative
-        try io.writeInt(res_writer, 0xbeef); // entity id
+        player.eid = 0xbeef; // dummy entity id
+        try io.writeInt(res_writer, player.eid); // entity id
         try io.writeByte(res_writer, player.gamemode); // gamemode
         try io.writeInt(res_writer, 0); // dimension
         try io.writeByte(res_writer, 2); // difficulty
@@ -152,6 +156,16 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         try io.writeString(res_writer, "default"); // level type
         try io.writeBool(res_writer, false); // reduced debug info
         try io.writePacket(tcp_writer, 0x23, res_writer.buffered());
+        _ = res_writer.consumeAll();
+
+        // set slot
+        try io.writeByte(res_writer, 0); // window id (0 for player inventory)
+        try io.writeShort(res_writer, 36); // slot id, (36-44 for hotbar)
+        try io.writeShort(res_writer, 257); // item id, -1 for empty (next fields not sent if -1)
+        try io.writeByte(res_writer, 1); // item count
+        try io.writeShort(res_writer, 0); // item damage
+        try io.writeBytes(res_writer, &[_]u8{0}); // item nbt, 0 for none
+        try io.writePacket(tcp_writer, 0x16, res_writer.buffered());
         _ = res_writer.consumeAll();
 
         // update player list
@@ -309,7 +323,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         std.log.info("player_animation: hand {}", .{hand});
 
         // // jump
-        // try io.writeVarInt(res_writer, 0xbeef); // entity id
+        // try io.writeVarInt(res_writer, player.eid); // entity id
         // try io.writeShort(res_writer, 0); // velocity x
         // try io.writeShort(res_writer, 10000); // velocity y
         // try io.writeShort(res_writer, 0); // velocity z
