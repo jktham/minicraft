@@ -1,19 +1,27 @@
 const std = @import("std");
 
 // blockid(9) + meta(4)
-pub const palette = [_]i32{
+pub const palette = [_]u13{
     0b000000000_0000, // air
-    0b000000010_0000, // grass
     0b000000001_0000, // stone
+    0b000000010_0000, // grass
+    0b000000011_0000, // dirt
+    0b000000100_0000, // cobblestone
+    0b000000101_0000, // planks
+    0b000000110_0000, // sapling
     0b000000111_0000, // bedrock
 };
 
 // index into palette
 pub const Block = enum(u8) {
     Air = 0,
-    Grass = 1,
-    Stone = 2,
-    Bedrock = 3,
+    Stone = 1,
+    Grass = 2,
+    Dirt = 3,
+    Cobblestone = 4,
+    Planks = 5,
+    Sapling = 6,
+    Bedrock = 7,
 };
 
 pub const N_CHUNKS = 9; // number of chunks in each direction (x and z)

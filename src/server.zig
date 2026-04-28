@@ -294,15 +294,53 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
 
         if (player.gamemode == 1 and status == 0 or player.gamemode == 0 and status == 2) {
             // finish digging, set block to air
+            const block = try world.getBlock(@intCast(x), @intCast(y), @intCast(z));
             try world.setBlock(@intCast(x), @intCast(y), @intCast(z), world.Block.Air);
 
-            // spawn xp orb
-            try io.writeVarInt(res_writer, std.crypto.random.int(i32)); // entity id
-            try io.writeDouble(res_writer, @floatFromInt(x)); // x
-            try io.writeDouble(res_writer, @floatFromInt(y)); // y
-            try io.writeDouble(res_writer, @floatFromInt(z)); // z
-            try io.writeShort(res_writer, 10); // count
-            try io.writePacket(tcp_writer, 0x01, res_writer.buffered());
+            // // spawn xp orb
+            // try io.writeVarInt(res_writer, std.crypto.random.int(i32)); // entity id
+            // try io.writeDouble(res_writer, @floatFromInt(x)); // x
+            // try io.writeDouble(res_writer, @floatFromInt(y)); // y
+            // try io.writeDouble(res_writer, @floatFromInt(z)); // z
+            // try io.writeShort(res_writer, 10); // count
+            // try io.writePacket(tcp_writer, 0x01, res_writer.buffered());
+            // _ = res_writer.consumeAll();
+
+            player.xp += 1; // dummy xp amount
+            // set experience, http://minecraft.gamepedia.com/Experience%23Leveling_up
+            try io.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(player.xp, 10))) / 10.0); // xp bar (0.0-1.0)
+            try io.writeVarInt(res_writer, @divFloor(player.xp, 10)); // level
+            try io.writeVarInt(res_writer, player.xp); // total xp
+            try io.writePacket(tcp_writer, 0x40, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            // spawn item entity
+            const eid = std.crypto.random.int(i32);
+            try io.writeVarInt(res_writer, eid); // entity id
+            try io.writeUUID(res_writer, std.crypto.random.int(u128)); // entity uuid
+            try io.writeByte(res_writer, 2); // type
+            try io.writeDouble(res_writer, @as(f64, @floatFromInt(x)) + 0.5); // x
+            try io.writeDouble(res_writer, @as(f64, @floatFromInt(y)) + 0.5); // y
+            try io.writeDouble(res_writer, @as(f64, @floatFromInt(z)) + 0.5); // z
+            try io.writeByte(res_writer, 0); // pitch
+            try io.writeByte(res_writer, 0); // yaw
+            try io.writeInt(res_writer, 1); // data
+            try io.writeShort(res_writer, 0); // velocity x
+            try io.writeShort(res_writer, 0); // velocity y
+            try io.writeShort(res_writer, 0); // velocity z
+            try io.writePacket(tcp_writer, 0x00, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            // update item entity metadata, https://c4k3.github.io/wiki.vg/Entities.html#Item
+            try io.writeVarInt(res_writer, eid); // entity id
+            try io.writeByte(res_writer, 6); // index (slot for items)
+            try io.writeVarInt(res_writer, 5); // type (5 for slot)
+            try io.writeShort(res_writer, @intFromEnum(block)); // item id
+            try io.writeByte(res_writer, 1); // item count
+            try io.writeShort(res_writer, 0); // item damage
+            try io.writeBytes(res_writer, &[_]u8{0}); // item nbt, 0 for none
+            try io.writeByte(res_writer, 0xff); // end of metadata
+            try io.writePacket(tcp_writer, 0x3c, res_writer.buffered());
             _ = res_writer.consumeAll();
 
         }
