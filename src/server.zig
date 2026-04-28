@@ -3,6 +3,7 @@ const net = std.net;
 const io = @import("io.zig");
 const player = @import("player.zig");
 const world = @import("world.zig");
+const entities = @import("entities.zig");
 
 // 1.12.2 protocol: https://minecraft.wiki/w/Protocol?oldid=2772385, https://c4k3.github.io/wiki.vg/Protocol.html
 // 1.12.2 block/item/entity ids: https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
@@ -146,7 +147,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         _ = res_writer.consumeAll();
 
         // join game
-        player.gamemode = 0; // creative
+        player.gamemode = 0; // 0=survival, 1=creative
         player.eid = 0xbeef; // dummy entity id
         try io.writeInt(res_writer, player.eid); // entity id
         try io.writeByte(res_writer, player.gamemode); // gamemode
@@ -255,6 +256,35 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         std.log.info("position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
         player.position = [3]f64{ x, y, z };
+        // TODO: put this somewhere
+        const items = try entities.getCloseItems(player.position, 1.0);
+        for (items) |item| {
+            // collect item
+            try io.writeVarInt(res_writer, item.eid); // collected
+            try io.writeVarInt(res_writer, player.eid); // collector
+            try io.writeVarInt(res_writer, item.count); // count
+            try io.writePacket(tcp_writer, 0x4b, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            // set slot
+            // TODO: keep track of inventory
+            try io.writeByte(res_writer, 0); // window id (0 for player inventory)
+            try io.writeShort(res_writer, 37); // slot id, (36-44 for hotbar)
+            try io.writeShort(res_writer, item.id); // item id, -1 for empty (next fields not sent if -1)
+            try io.writeByte(res_writer, item.count); // item count
+            try io.writeShort(res_writer, item.damage); // item damage
+            try io.writeBytes(res_writer, item.nbt); // item nbt, 0 for none
+            try io.writePacket(tcp_writer, 0x16, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            // destroy item entity
+            try io.writeVarInt(res_writer, 1); // count
+            try io.writeVarInt(res_writer, item.eid); // entity id
+            try io.writePacket(tcp_writer, 0x32, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            try entities.removeItem(item.eid);
+        }
 
     } else if (state.* == State.Play and packet_id == 0x0e) {
         // position and look update
@@ -267,6 +297,33 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         std.log.info("position_look_update: position ({}, {}, {}), yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
         player.position = [3]f64{ x, y, z };
+        const items = try entities.getCloseItems(player.position, 1.0);
+        for (items) |item| {
+            // collect item
+            try io.writeVarInt(res_writer, item.eid); // collected
+            try io.writeVarInt(res_writer, player.eid); // collector
+            try io.writeVarInt(res_writer, item.count); // count
+            try io.writePacket(tcp_writer, 0x4b, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            // set slot
+            try io.writeByte(res_writer, 0); // window id (0 for player inventory)
+            try io.writeShort(res_writer, 37); // slot id, (36-44 for hotbar)
+            try io.writeShort(res_writer, item.id); // item id, -1 for empty (next fields not sent if -1)
+            try io.writeByte(res_writer, item.count); // item count
+            try io.writeShort(res_writer, item.damage); // item damage
+            try io.writeBytes(res_writer, item.nbt); // item nbt, 0 for none
+            try io.writePacket(tcp_writer, 0x16, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            // destroy item entity
+            try io.writeVarInt(res_writer, 1); // count
+            try io.writeVarInt(res_writer, item.eid); // entity id
+            try io.writePacket(tcp_writer, 0x32, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            try entities.removeItem(item.eid);
+        }
 
     } else if (state.* == State.Play and packet_id == 0x0f) {
         // look update
@@ -298,7 +355,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
             try world.setBlock(@intCast(x), @intCast(y), @intCast(z), world.Block.Air);
 
             // // spawn xp orb
-            // try io.writeVarInt(res_writer, std.crypto.random.int(i32)); // entity id
+            // try io.writeVarInt(res_writer, entities.randomEID()); // entity id
             // try io.writeDouble(res_writer, @floatFromInt(x)); // x
             // try io.writeDouble(res_writer, @floatFromInt(y)); // y
             // try io.writeDouble(res_writer, @floatFromInt(z)); // z
@@ -315,13 +372,15 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
             _ = res_writer.consumeAll();
 
             // spawn item entity
-            const eid = std.crypto.random.int(i32);
+            const eid = entities.randomEID();
+            const uuid = entities.randomUUID();
+            const position = [3]f64{ @as(f64, @floatFromInt(x)) + 0.5, @as(f64, @floatFromInt(y)) + 0.5, @as(f64, @floatFromInt(z)) + 0.5 };
             try io.writeVarInt(res_writer, eid); // entity id
-            try io.writeUUID(res_writer, std.crypto.random.int(u128)); // entity uuid
+            try io.writeUUID(res_writer, uuid); // entity uuid
             try io.writeByte(res_writer, 2); // type
-            try io.writeDouble(res_writer, @as(f64, @floatFromInt(x)) + 0.5); // x
-            try io.writeDouble(res_writer, @as(f64, @floatFromInt(y)) + 0.5); // y
-            try io.writeDouble(res_writer, @as(f64, @floatFromInt(z)) + 0.5); // z
+            try io.writeDouble(res_writer, position[0]); // x
+            try io.writeDouble(res_writer, position[1]); // y
+            try io.writeDouble(res_writer, position[2]); // z
             try io.writeByte(res_writer, 0); // pitch
             try io.writeByte(res_writer, 0); // yaw
             try io.writeInt(res_writer, 1); // data
@@ -332,13 +391,19 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
             _ = res_writer.consumeAll();
 
             // update item entity metadata, https://c4k3.github.io/wiki.vg/Entities.html#Item
+            const id = @intFromEnum(block);
+            const count = 1;
+            const damage = 0;
+            const nbt = [_]u8{0}; // no nbt
+            try entities.addItem(eid, uuid, position, id, count, damage, &nbt);
+
             try io.writeVarInt(res_writer, eid); // entity id
             try io.writeByte(res_writer, 6); // index (slot for items)
             try io.writeVarInt(res_writer, 5); // type (5 for slot)
-            try io.writeShort(res_writer, @intFromEnum(block)); // item id
-            try io.writeByte(res_writer, 1); // item count
-            try io.writeShort(res_writer, 0); // item damage
-            try io.writeBytes(res_writer, &[_]u8{0}); // item nbt, 0 for none
+            try io.writeShort(res_writer, id); // item id
+            try io.writeByte(res_writer, count); // item count
+            try io.writeShort(res_writer, damage); // item damage
+            try io.writeBytes(res_writer, &nbt); // item nbt, 0 for none
             try io.writeByte(res_writer, 0xff); // end of metadata
             try io.writePacket(tcp_writer, 0x3c, res_writer.buffered());
             _ = res_writer.consumeAll();
