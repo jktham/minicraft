@@ -8,7 +8,7 @@ pub const Item = struct {
     id: i16, // https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
     count: u8,
     damage: i16,
-    nbt: []const u8,
+    nbt: []const u8, // {0} for empty
 };
 
 pub var items: std.ArrayList(Item) = .empty;

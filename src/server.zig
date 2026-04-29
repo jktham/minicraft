@@ -45,6 +45,7 @@ fn handleClient(client: net.Server.Connection) !void {
     const tcp_writer: *std.io.Writer = &w.interface;
     
     var state: State = State.Handshaking;
+    var lastKeepAlive: i64 = 0;
 
     while (true) {
         const packet_id, const data = io.readPacket(tcp_reader) catch |err| {
@@ -55,13 +56,13 @@ fn handleClient(client: net.Server.Connection) !void {
             std.log.err("Error reading packet: {}", .{err});
             return;
         };
-        try processPacket(tcp_writer, &state, packet_id, data);
+        try processPacket(tcp_writer, &state, packet_id, data, &lastKeepAlive);
+        try update(tcp_writer);
     }
 }
 
-var lastKeepAlive: i64 = 0;
-
-fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
+// handle incoming packets, update state, and send responses
+fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_data: []const u8, lastKeepAlive: *i64) !void {
     var r = std.io.Reader.fixed(req_data);
     const req_reader = &r;
 
@@ -70,9 +71,9 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
     const res_writer = &w;
 
     const time = std.time.milliTimestamp();
-    if (state.* == State.Play and time - lastKeepAlive > 10000) {
+    if (state.* == State.Play and time - lastKeepAlive.* > 10000) {
         // keep alive
-        lastKeepAlive = time;
+        lastKeepAlive.* = time;
         try io.writeLong(res_writer, time); // id
         try io.writePacket(tcp_writer, 0x1f, res_writer.buffered());
         _ = res_writer.consumeAll();
@@ -129,8 +130,8 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         player.name = name;
         player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
         // login success response (skip encryption)
-        try io.writeString(res_writer, try io.UUIDtoString(player.uuid)); // uuid as string
-        try io.writeString(res_writer, player.name); // username
+        try io.writeString(res_writer, try io.UUIDtoString(player.uuid.?)); // uuid as string
+        try io.writeString(res_writer, player.name.?); // username
         try io.writePacket(tcp_writer, 0x02, res_writer.buffered());
         _ = res_writer.consumeAll();
 
@@ -147,10 +148,10 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         _ = res_writer.consumeAll();
 
         // join game
-        player.gamemode = 0; // 0=survival, 1=creative
         player.eid = 0xbeef; // dummy entity id
-        try io.writeInt(res_writer, player.eid); // entity id
-        try io.writeByte(res_writer, player.gamemode); // gamemode
+        player.gamemode = 0; // 0=survival, 1=creative
+        try io.writeInt(res_writer, player.eid.?); // entity id
+        try io.writeByte(res_writer, player.gamemode.?); // gamemode
         try io.writeInt(res_writer, 0); // dimension
         try io.writeByte(res_writer, 2); // difficulty
         try io.writeByte(res_writer, 0); // max players
@@ -172,22 +173,26 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         // update player list
         try io.writeVarInt(res_writer, 0); // action: add
         try io.writeVarInt(res_writer, 1); // number of players
-        try io.writeUUID(res_writer, player.uuid); // player uuid
-        try io.writeString(res_writer, player.name); // player name
+        try io.writeUUID(res_writer, player.uuid.?); // player uuid
+        try io.writeString(res_writer, player.name.?); // player name
         try io.writeVarInt(res_writer, 0); // properties
-        try io.writeVarInt(res_writer, player.gamemode); // gamemode
-        try io.writeVarInt(res_writer, player.ping); // ping
+        try io.writeVarInt(res_writer, player.gamemode.?); // gamemode
+        try io.writeVarInt(res_writer, player.ping orelse 0); // ping
         try io.writeBool(res_writer, false); // has display name
         try io.writePacket(tcp_writer, 0x2e, res_writer.buffered());
         _ = res_writer.consumeAll();
 
         // update client position (ends loading screen)
         const center = @as(f32, world.N_CHUNKS * world.N_BLOCKS) / 2.0;
-        try io.writeDouble(res_writer, center); // x
-        try io.writeDouble(res_writer, 20); // y
-        try io.writeDouble(res_writer, center); // z
-        try io.writeFloat(res_writer, 0); // yaw
-        try io.writeFloat(res_writer, 0); // pitch
+        if (player.position == null and player.look == null) {
+            player.position = [3]f64{ center, 20, center };
+            player.look = [2]f32{ 0, 0 };
+        }
+        try io.writeDouble(res_writer, player.position.?[0]); // x
+        try io.writeDouble(res_writer, player.position.?[1]); // y
+        try io.writeDouble(res_writer, player.position.?[2]); // z
+        try io.writeFloat(res_writer, player.look.?[0]); // yaw
+        try io.writeFloat(res_writer, player.look.?[1]); // pitch
         try io.writeByte(res_writer, 0b00000000); // flags (relative)
         try io.writeVarInt(res_writer, @truncate(time & 0x7FFFFFFF)); // teleport id
         try io.writePacket(tcp_writer, 0x2f, res_writer.buffered());
@@ -256,35 +261,6 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         std.log.info("position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
         player.position = [3]f64{ x, y, z };
-        // TODO: put this somewhere
-        const items = try entities.getCloseItems(player.position, 1.0);
-        for (items) |item| {
-            // collect item
-            try io.writeVarInt(res_writer, item.eid); // collected
-            try io.writeVarInt(res_writer, player.eid); // collector
-            try io.writeVarInt(res_writer, item.count); // count
-            try io.writePacket(tcp_writer, 0x4b, res_writer.buffered());
-            _ = res_writer.consumeAll();
-
-            // set slot
-            // TODO: keep track of inventory
-            try io.writeByte(res_writer, 0); // window id (0 for player inventory)
-            try io.writeShort(res_writer, 37); // slot id, (36-44 for hotbar)
-            try io.writeShort(res_writer, item.id); // item id, -1 for empty (next fields not sent if -1)
-            try io.writeByte(res_writer, item.count); // item count
-            try io.writeShort(res_writer, item.damage); // item damage
-            try io.writeBytes(res_writer, item.nbt); // item nbt, 0 for none
-            try io.writePacket(tcp_writer, 0x16, res_writer.buffered());
-            _ = res_writer.consumeAll();
-
-            // destroy item entity
-            try io.writeVarInt(res_writer, 1); // count
-            try io.writeVarInt(res_writer, item.eid); // entity id
-            try io.writePacket(tcp_writer, 0x32, res_writer.buffered());
-            _ = res_writer.consumeAll();
-
-            try entities.removeItem(item.eid);
-        }
 
     } else if (state.* == State.Play and packet_id == 0x0e) {
         // position and look update
@@ -297,33 +273,7 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         std.log.info("position_look_update: position ({}, {}, {}), yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
         player.position = [3]f64{ x, y, z };
-        const items = try entities.getCloseItems(player.position, 1.0);
-        for (items) |item| {
-            // collect item
-            try io.writeVarInt(res_writer, item.eid); // collected
-            try io.writeVarInt(res_writer, player.eid); // collector
-            try io.writeVarInt(res_writer, item.count); // count
-            try io.writePacket(tcp_writer, 0x4b, res_writer.buffered());
-            _ = res_writer.consumeAll();
-
-            // set slot
-            try io.writeByte(res_writer, 0); // window id (0 for player inventory)
-            try io.writeShort(res_writer, 37); // slot id, (36-44 for hotbar)
-            try io.writeShort(res_writer, item.id); // item id, -1 for empty (next fields not sent if -1)
-            try io.writeByte(res_writer, item.count); // item count
-            try io.writeShort(res_writer, item.damage); // item damage
-            try io.writeBytes(res_writer, item.nbt); // item nbt, 0 for none
-            try io.writePacket(tcp_writer, 0x16, res_writer.buffered());
-            _ = res_writer.consumeAll();
-
-            // destroy item entity
-            try io.writeVarInt(res_writer, 1); // count
-            try io.writeVarInt(res_writer, item.eid); // entity id
-            try io.writePacket(tcp_writer, 0x32, res_writer.buffered());
-            _ = res_writer.consumeAll();
-
-            try entities.removeItem(item.eid);
-        }
+        player.look = [2]f32{ yaw, pitch };
 
     } else if (state.* == State.Play and packet_id == 0x0f) {
         // look update
@@ -331,6 +281,8 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
         const pitch = try io.readFloat(req_reader);
         const on_ground = try io.readBool(req_reader);
         std.log.info("look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
+
+        player.look = [2]f32{ yaw, pitch };
 
     } else if (state.* == State.Play and packet_id == 0x00) {
         // teleport confirm
@@ -363,11 +315,14 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
             // try io.writePacket(tcp_writer, 0x01, res_writer.buffered());
             // _ = res_writer.consumeAll();
 
-            player.xp += 1; // dummy xp amount
+            if (player.xp == null) {
+                player.xp = 0;
+            }
+            player.xp.? += 1; // dummy xp amount
             // set experience, http://minecraft.gamepedia.com/Experience%23Leveling_up
-            try io.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(player.xp, 10))) / 10.0); // xp bar (0.0-1.0)
-            try io.writeVarInt(res_writer, @divFloor(player.xp, 10)); // level
-            try io.writeVarInt(res_writer, player.xp); // total xp
+            try io.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(player.xp.?, 10))) / 10.0); // xp bar (0.0-1.0)
+            try io.writeVarInt(res_writer, @divFloor(player.xp.?, 10)); // level
+            try io.writeVarInt(res_writer, player.xp.?); // total xp
             try io.writePacket(tcp_writer, 0x40, res_writer.buffered());
             _ = res_writer.consumeAll();
 
@@ -447,6 +402,44 @@ fn processPacket(tcp_writer: *std.io.Writer, state: *State, packet_id: u8, req_d
 
     } else {
         std.log.warn("unknown packet id 0x{x:0>2} in state {s}", .{ packet_id, @tagName(state.*) });
+    }
+}
+
+// update server state and send responses to client
+fn update(tcp_writer: *std.io.Writer) !void {
+    var res_data: [10000000]u8 = undefined;
+    var w = std.io.Writer.fixed(&res_data);
+    const res_writer = &w;
+
+    // collect nearby items
+    if (player.position != null and player.eid != null) {
+        const items = try entities.getCloseItems(player.position.?, 1.0);
+        for (items) |item| {
+            // collect item
+            try io.writeVarInt(res_writer, item.eid); // collected
+            try io.writeVarInt(res_writer, player.eid.?); // collector
+            try io.writeVarInt(res_writer, item.count); // count
+            try io.writePacket(tcp_writer, 0x4b, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            // set slot
+            try io.writeByte(res_writer, 0); // window id (0 for player inventory)
+            try io.writeShort(res_writer, 37); // slot id, (36-44 for hotbar)
+            try io.writeShort(res_writer, item.id); // item id, -1 for empty (next fields not sent if -1)
+            try io.writeByte(res_writer, item.count); // item count
+            try io.writeShort(res_writer, item.damage); // item damage
+            try io.writeBytes(res_writer, item.nbt); // item nbt, 0 for none
+            try io.writePacket(tcp_writer, 0x16, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            // destroy item entity
+            try io.writeVarInt(res_writer, 1); // count
+            try io.writeVarInt(res_writer, item.eid); // entity id
+            try io.writePacket(tcp_writer, 0x32, res_writer.buffered());
+            _ = res_writer.consumeAll();
+
+            try entities.removeItem(item.eid);
+        }
     }
 }
 
