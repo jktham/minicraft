@@ -1,6 +1,6 @@
 const std = @import("std");
 
-// blockid(9) + meta(4)
+/// blockid(9) + meta(4)
 pub const palette = [_]u13{
     0b000000000_0000, // air
     0b000000001_0000, // stone
@@ -12,7 +12,7 @@ pub const palette = [_]u13{
     0b000000111_0000, // bedrock
 };
 
-// index into palette
+/// index into palette
 pub const Block = enum(u8) {
     Air = 0,
     Stone = 1,
@@ -28,7 +28,7 @@ pub const N_CHUNKS = 9; // number of chunks in each direction (x and z)
 pub const N_SUBCHUNKS = 16; // number of subchunks per column (y direction)
 pub const N_BLOCKS = 16; // number of blocks in each direction within a subchunk
 
-// chunk xzy, local yzx
+/// chunk xzy, local yzx
 pub var chunks: [N_CHUNKS][N_CHUNKS][N_SUBCHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]u8 = undefined;
 
 pub fn generate() !void {
@@ -94,7 +94,7 @@ pub fn getBlock(x: i32, y: i32, z: i32) !Block {
     return @enumFromInt(chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)][@intCast(local_y)][@intCast(local_z)][@intCast(local_x)]);
 }
 
-// pointer to flat array of 4096 blocks in the subchunk, for direct writing to network buffer in local yxz order
+/// pointer to flat array of 4096 blocks in the subchunk, for direct writing to network buffer in local yxz order
 pub fn getChunkPointer(chunk_x: i32, chunk_y: i32, chunk_z: i32) !*[4096]u8 {
     if (chunk_x < 0 or chunk_x >= N_CHUNKS or chunk_y < 0 or chunk_y >= N_SUBCHUNKS or chunk_z < 0 or chunk_z >= N_CHUNKS) {
         std.log.err("Attempted to get chunk pointer outside of world bounds at ({}, {}, {})", .{ chunk_x, chunk_y, chunk_z });

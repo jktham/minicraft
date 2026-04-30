@@ -3,6 +3,7 @@ const data = @import("data.zig");
 const player = @import("player.zig");
 const world = @import("world.zig");
 const entities = @import("entities.zig");
+const utils = @import("utils.zig");
 
 // 1.12.2 protocol: https://minecraft.wiki/w/Protocol?oldid=2772385, https://c4k3.github.io/wiki.vg/Protocol.html
 // 1.12.2 block/item/entity ids: https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
@@ -27,7 +28,14 @@ pub fn startServer(io: std.Io, gpa: std.mem.Allocator) !void {
     std.log.info("Listening on {f}", .{server.socket.address});
     while (true) {
         const client = try server.accept(io);
-        try handleClient(io, gpa, client);
+        handleClient(io, gpa, client) catch |err| {
+            if (err == error.EndOfStream) {
+                std.log.info("Client disconnected: {f}", .{client.socket.address});
+                continue;
+            }
+            std.log.err("Error reading packet: {}", .{err});
+            continue;
+        };
     }
 }
 
@@ -44,24 +52,23 @@ fn handleClient(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream) !
     const tcp_writer: *std.Io.Writer = &w.interface;
     
     var state: State = State.Handshaking;
-    var lastKeepAlive: i64 = 0;
+    var lastUpdate: i64 = utils.getTime(io);
+    var lastKeepAlive: i64 = utils.getTime(io);
 
-    while (true) {
-        const packet_id, const packet_data = data.readPacket(gpa, tcp_reader) catch |err| {
-            if (err == error.EndOfStream) {
-                std.log.info("Client disconnected: {f}", .{client.socket.address});
-                return;
-            }
-            std.log.err("Error reading packet: {}", .{err});
-            return;
-        };
-        try processPacket(io, gpa, tcp_writer, &state, packet_id, packet_data, &lastKeepAlive);
-        try update(gpa, tcp_writer);
+    while (true) {  
+        try updateNetwork(io, gpa, tcp_reader, tcp_writer, &state);
+        try updateFixed(io, gpa, tcp_writer, &state, &lastUpdate, &lastKeepAlive);
     }
 }
 
-// handle incoming packets, update state, and send responses
-fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *State, packet_id: u8, req_data: []const u8, lastKeepAlive: *i64) !void {
+/// on receiving a packet, update server state and send responses as needed \
+/// TODO: fix blocking behavior when no more tcp packets to read from socket
+fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_reader: *std.Io.Reader, tcp_writer: *std.Io.Writer, state: *State) !void {
+    const packet_id, const packet_data = try data.readPacket(gpa, tcp_reader);
+    try processPacket(io, gpa, tcp_writer, state, packet_id, packet_data);
+}
+
+fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
     var r = std.Io.Reader.fixed(req_data);
     const req_reader = &r;
 
@@ -69,15 +76,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
     var w = std.Io.Writer.fixed(&res_data);
     const res_writer = &w;
 
-    const time = std.Io.Clock.real.now(io).toMilliseconds();
-    if (state.* == State.Play and time - lastKeepAlive.* > 10000) {
-        // keep alive
-        lastKeepAlive.* = time;
-        try data.writeLong(res_writer, time); // id
-        try data.writePacket(gpa, tcp_writer, 0x1f, res_writer.buffered());
-        _ = res_writer.consumeAll();
-        std.log.info("Sent keep alive", .{});
-    }
+    const time = utils.getTime(io);
 
     if (state.* == State.Handshaking and packet_id == 0x00) {
         // handshake request
@@ -400,11 +399,25 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
     }
 }
 
-// update server state and send responses to client
-fn update(gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer) !void {
+/// once per tick, update server state and send data to client
+fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *State, lastUpdate: *i64, lastKeepAlive: *i64) !void {
     var res_data: [10000000]u8 = undefined;
     var w = std.Io.Writer.fixed(&res_data);
     const res_writer = &w;
+
+    const time = utils.getTime(io);
+    const delta = time - lastUpdate.*;
+    lastUpdate.* = time;
+    std.log.debug("updateFixed: delta {d} ms", .{delta});
+
+    if (state.* == State.Play and time - lastKeepAlive.* > 10000) {
+        // keep alive
+        lastKeepAlive.* = time;
+        try data.writeLong(res_writer, time); // id
+        try data.writePacket(gpa, tcp_writer, 0x1f, res_writer.buffered());
+        _ = res_writer.consumeAll();
+        std.log.info("Sent keep alive", .{});
+    }
 
     // collect nearby items
     if (player.position != null and player.eid != null) {

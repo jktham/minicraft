@@ -640,7 +640,7 @@ test "testString" {
     try std.testing.expectError(error.InvalidStringLength, readString(&reader));
 }
 
-// returns total number of bytes that would be written for the given string, including the length prefix
+/// returns total number of bytes that would be written for the given string, including the length prefix
 pub fn computeStringByteLength(string: []const u8) usize {
     return string.len + computeVarIntByteLength(@intCast(string.len));
 }
@@ -668,7 +668,7 @@ pub fn readPacket(gpa: std.mem.Allocator, reader: *std.Io.Reader) !struct{u8, []
     return .{packet_id, packet_data};
 }
 
-// write packet and flush
+/// write packet and flush
 pub fn writePacket(gpa: std.mem.Allocator, writer: *std.Io.Writer, packet_id: u8, packet_data: []const u8) !void {
     try writeVarInt(writer, @intCast(packet_data.len + 1));
     try writeByte(writer, packet_id);
@@ -728,7 +728,7 @@ test "testPacket" {
     try std.testing.expectError(error.InvalidPacketLength, readPacket(&reader));
 }
 
-// replace non-printable characters in a string for logging purposes
+/// replace non-printable characters in a string for logging purposes
 pub fn sanitizeString(gpa: std.mem.Allocator, str: []const u8) ![]const u8 {
     var sanitized = try gpa.dupe(u8, str);
     for (sanitized, 0..sanitized.len) |c, i| {
