@@ -4,6 +4,7 @@ const player = @import("player.zig");
 const world = @import("world.zig");
 const entities = @import("entities.zig");
 const utils = @import("utils.zig");
+const inventory = @import("inventory.zig");
 
 // 1.12.2 protocol: https://minecraft.wiki/w/Protocol?oldid=2772385, https://c4k3.github.io/wiki.vg/Protocol.html
 // 1.12.2 block/item/entity ids: https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
@@ -55,7 +56,7 @@ fn handleClient(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream) !
     var lastUpdate: i64 = utils.getTime(io);
     var lastKeepAlive: i64 = utils.getTime(io);
 
-    while (true) {  
+    while (true) {
         try updateNetwork(io, gpa, tcp_reader, tcp_writer, &state);
         try updateFixed(io, gpa, tcp_writer, &state, &lastUpdate, &lastKeepAlive);
     }
@@ -156,10 +157,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         // set slot
         try data.writeByte(res_writer, 0); // window id (0 for player inventory)
         try data.writeShort(res_writer, 36); // slot id, (36-44 for hotbar)
-        try data.writeShort(res_writer, 257); // item id, -1 for empty (next fields not sent if -1)
-        try data.writeByte(res_writer, 1); // item count
-        try data.writeShort(res_writer, 0); // item damage
-        try data.writeBytes(res_writer, &[_]u8{0}); // item nbt, 0 for none
+        try data.writeSlot(res_writer, .{ .id = inventory.Item.IronPickaxe, .count = 1, .damage = 0, .nbt = &[_]u8{0} });
         try data.writePacket(gpa, tcp_writer, 0x16, res_writer.buffered());
         _ = res_writer.consumeAll();
 
@@ -340,19 +338,18 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             _ = res_writer.consumeAll();
 
             // update item entity metadata, https://c4k3.github.io/wiki.vg/Entities.html#Item
-            const id = @intFromEnum(block);
-            const count = 1;
-            const damage = 0;
-            const nbt = [_]u8{0}; // no nbt
-            try entities.addItem(eid, uuid, position, id, count, damage, &nbt);
+            const slot = inventory.Slot{
+                .id = inventory.blockToItem(block),
+                .count = 1,
+                .damage = 0,
+                .nbt = &[_]u8{0},
+            };
+            try entities.spawnItem(gpa, eid, uuid, position, slot);
 
             try data.writeVarInt(res_writer, eid); // entity id
             try data.writeByte(res_writer, 6); // index (slot for items)
             try data.writeVarInt(res_writer, 5); // type (5 for slot)
-            try data.writeShort(res_writer, id); // item id
-            try data.writeByte(res_writer, count); // item count
-            try data.writeShort(res_writer, damage); // item damage
-            try data.writeBytes(res_writer, &nbt); // item nbt, 0 for none
+            try data.writeSlot(res_writer, slot);
             try data.writeByte(res_writer, 0xff); // end of metadata
             try data.writePacket(gpa, tcp_writer, 0x3c, res_writer.buffered());
             _ = res_writer.consumeAll();
@@ -420,23 +417,20 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, s
     }
 
     // collect nearby items
-    if (player.position != null and player.eid != null) {
-        const items = try entities.getCloseItems(player.position.?, 1.0);
-        for (items) |item| {
+    if (state.* == State.Play and player.position != null and player.eid != null) {
+        const close_items = try entities.getCloseItems(gpa, player.position.?, 1.0);
+        for (close_items) |item| {
             // collect item
             try data.writeVarInt(res_writer, item.eid); // collected
             try data.writeVarInt(res_writer, player.eid.?); // collector
-            try data.writeVarInt(res_writer, item.count); // count
+            try data.writeVarInt(res_writer, item.slot.count); // count
             try data.writePacket(gpa, tcp_writer, 0x4b, res_writer.buffered());
             _ = res_writer.consumeAll();
 
             // set slot
             try data.writeByte(res_writer, 0); // window id (0 for player inventory)
             try data.writeShort(res_writer, 37); // slot id, (36-44 for hotbar)
-            try data.writeShort(res_writer, item.id); // item id, -1 for empty (next fields not sent if -1)
-            try data.writeByte(res_writer, item.count); // item count
-            try data.writeShort(res_writer, item.damage); // item damage
-            try data.writeBytes(res_writer, item.nbt); // item nbt, 0 for none
+            try data.writeSlot(res_writer, item.slot); // item data
             try data.writePacket(gpa, tcp_writer, 0x16, res_writer.buffered());
             _ = res_writer.consumeAll();
 
@@ -446,7 +440,7 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, s
             try data.writePacket(gpa, tcp_writer, 0x32, res_writer.buffered());
             _ = res_writer.consumeAll();
 
-            try entities.removeItem(item.eid);
+            try entities.destroyItem(item.eid);
         }
     }
 }

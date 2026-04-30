@@ -1,5 +1,6 @@
 const std = @import("std");
 const print = std.debug.print;
+const inventory = @import("inventory.zig");
 
 test "testBuf" {
     var buf: [1000]u8 = undefined;
@@ -689,7 +690,7 @@ test "testPacket" {
 
     const values = [_]struct{u8, []const u8}{ .{0x01, "Test"}, .{0xff, ""}, .{0x10, &[_]u8{0x01, 0x02}} };
     for (values) |v| {
-        try writePacket(&writer, v[0], v[1]);
+        try writePacket(std.heap.smp_allocator, &writer, v[0], v[1]);
     }
     try writer.flush();
 
@@ -712,7 +713,7 @@ test "testPacket" {
     }
 
     for (values, 0..) |v, i| {
-        const read_value = try readPacket(&reader);
+        const read_value = try readPacket(std.heap.smp_allocator, &reader);
         std.testing.expect(read_value[0] == v[0]) catch |err| {
             print("read 0x{x:0>2}, expected 0x{x:0>2} at index {}\n", .{read_value[0], v[0], i});
             return err;
@@ -725,7 +726,7 @@ test "testPacket" {
 
     try writeVarInt(&writer, 0); // invalid length
     try writer.flush();
-    try std.testing.expectError(error.InvalidPacketLength, readPacket(&reader));
+    try std.testing.expectError(error.InvalidPacketLength, readPacket(std.heap.smp_allocator, &reader));
 }
 
 /// replace non-printable characters in a string for logging purposes
@@ -797,6 +798,75 @@ test "testPosition" {
         const read_value = try readPosition(&reader);
         std.testing.expect(std.mem.eql(i64, &read_value, &v)) catch |err| {
             print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
+    }
+}
+
+pub fn readSlot(reader: *std.Io.Reader) !inventory.Slot {
+    const id: inventory.Item = @enumFromInt(try readShort(reader));
+    if (id == inventory.Item.Empty) {
+        return .{ .id = inventory.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} }; // empty slot, no more data
+    }
+    const count = try readByte(reader);
+    const damage = try readShort(reader);
+    const nbt = try readBytes(reader, 1); // TODO: read NBT data
+    return .{ .id = id, .count = count, .damage = damage, .nbt = nbt };
+}
+
+pub fn writeSlot(writer: *std.Io.Writer, slot: inventory.Slot) !void {
+    try writeShort(writer, @intFromEnum(slot.id));
+    if (slot.id == inventory.Item.Empty) {
+        return; // empty slot, no more data
+    }
+    try writeByte(writer, slot.count);
+    try writeShort(writer, slot.damage);
+    try writeBytes(writer, slot.nbt);
+}
+
+test "testSlot" {
+    var buf: [1000]u8 = undefined;
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
+
+    const values = [_]inventory.Slot{
+        .{ .id = inventory.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} },
+        .{ .id = inventory.Item.Stone, .count = 64, .damage = 0, .nbt = &[_]u8{0} },
+        .{ .id = inventory.Item.Grass, .count = 1, .damage = 5, .nbt = &[_]u8{0x01} }, // only 1-byte nbt array supported!
+    };
+    for (values) |v| {
+        try writeSlot(&writer, v);
+    }
+    try writer.flush();
+
+    const bytes = [_]u8{
+        0b11111111, 0b11111111,
+
+        0b00000000, 0b00000001,
+        0b01000000,
+        0b00000000, 0b00000000,
+        0b00000000,
+
+        0b00000000, 0b00000010,
+        0b00000001,
+        0b00000000, 0b00000101,
+        0b00000001,
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            return err;
+        };
+    }
+
+    for (values, 0..) |v, i| {
+        const read_value = try readSlot(&reader);
+        std.testing.expect(std.meta.eql(.{read_value.id, read_value.count, read_value.damage}, .{v.id, v.count, v.damage})) catch |err| {
+            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            return err;
+        };
+        std.testing.expect(std.mem.eql(u8, read_value.nbt, v.nbt)) catch |err| {
+            print("read 0x{x}, expected 0x{x} at index {}\n", .{read_value.nbt, v.nbt, i});
             return err;
         };
     }
