@@ -3,8 +3,8 @@ const print = std.debug.print;
 
 test "testBuf" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]u8{ 0, 1, 127, 255 };
     for (values) |v| {
@@ -19,18 +19,18 @@ test "testBuf" {
     }
 }
 
-pub fn readByte(reader: *std.io.Reader) !u8 {
+pub fn readByte(reader: *std.Io.Reader) !u8 {
     return reader.takeByte();
 }
 
-pub fn writeByte(writer: *std.io.Writer, value: u8) !void {
+pub fn writeByte(writer: *std.Io.Writer, value: u8) !void {
     try writer.writeByte(value);
 }
 
 test "testByte" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]u8{ 0, 1, 127, 255 };
     for (values) |v| {
@@ -47,18 +47,18 @@ test "testByte" {
     }
 }
 
-pub fn readBytes(reader: *std.io.Reader, n: usize) ![]const u8 {
+pub fn readBytes(reader: *std.Io.Reader, n: usize) ![]const u8 {
     return try reader.take(n);
 }
 
-pub fn writeBytes(writer: *std.io.Writer, bytes: []const u8) !void {
+pub fn writeBytes(writer: *std.Io.Writer, bytes: []const u8) !void {
     try writer.writeAll(bytes);
 }
 
 test "testBytes" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_][]const u8{ &[_]u8{0}, &[_]u8{1, 2, 3}, &[_]u8{} };
     for (values) |v| {
@@ -86,7 +86,7 @@ test "testBytes" {
     }
 }
 
-pub fn readBool(reader: *std.io.Reader) !bool {
+pub fn readBool(reader: *std.Io.Reader) !bool {
     const byte = try reader.takeByte();
     if (byte == 0) {
         return false;
@@ -97,14 +97,14 @@ pub fn readBool(reader: *std.io.Reader) !bool {
     }
 }
 
-pub fn writeBool(writer: *std.io.Writer, value: bool) !void {
+pub fn writeBool(writer: *std.Io.Writer, value: bool) !void {
     try writeByte(writer, if (value) 1 else 0);
 }
 
 test "testBool" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]bool{ false, true };
     for (values) |v| {
@@ -132,7 +132,7 @@ test "testBool" {
     }
 }
 
-pub fn readVarInt(reader: *std.io.Reader) !i32 {
+pub fn readVarInt(reader: *std.Io.Reader) !i32 {
     const CONTINUE_MASK: u8 = 0b10000000;
     const DATA_MASK: u8 = 0b01111111;
 
@@ -155,7 +155,7 @@ pub fn readVarInt(reader: *std.io.Reader) !i32 {
 }
 
 // param type i32 guarantees valid VarInt encoding, so no need to check for overflow when writing
-pub fn writeVarInt(writer: *std.io.Writer, value: i32) !void {
+pub fn writeVarInt(writer: *std.Io.Writer, value: i32) !void {
     const CONTINUE_MASK: u8 = 0b10000000;
     const DATA_MASK: u8 = 0b01111111;
 
@@ -177,8 +177,8 @@ pub fn writeVarInt(writer: *std.io.Writer, value: i32) !void {
 
 test "testVarInt" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]i32{ 0, 1, 2, 127, 128, 255, std.math.maxInt(i32), -1, std.math.minInt(i32) };
     for (values) |v| {
@@ -242,13 +242,13 @@ test "testVarIntByteLength" {
     }
 }
 
-pub fn readShort(reader: *std.io.Reader) !i16 {
+pub fn readShort(reader: *std.Io.Reader) !i16 {
     const bytes = try reader.take(2);
     const short: i16 = @as(i16, bytes[0]) << 8 | @as(i16, bytes[1]);
     return short;
 }
 
-pub fn writeShort(writer: *std.io.Writer, short: i16) !void {
+pub fn writeShort(writer: *std.Io.Writer, short: i16) !void {
     const bytes: [2]u8 = .{
         @intCast((short >> 8) & 0xFF),
         @intCast(short & 0xFF),
@@ -258,8 +258,8 @@ pub fn writeShort(writer: *std.io.Writer, short: i16) !void {
 
 test "testShort" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]i16{ 0, 1, 2, 127, 128, 255, std.math.maxInt(i16), -1, std.math.minInt(i16) };
     for (values) |v| {
@@ -294,13 +294,13 @@ test "testShort" {
     }
 }
 
-pub fn readInt(reader: *std.io.Reader) !i32 {
+pub fn readInt(reader: *std.Io.Reader) !i32 {
     const bytes = try reader.take(4);
     const int: i32 = @as(i32, bytes[0]) << 24 | @as(i32, bytes[1]) << 16 | @as(i32, bytes[2]) << 8 | @as(i32, bytes[3]);
     return int;
 }
 
-pub fn writeInt(writer: *std.io.Writer, int: i32) !void {
+pub fn writeInt(writer: *std.Io.Writer, int: i32) !void {
     const bytes: [4]u8 = .{
         @intCast((int >> 24) & 0xFF),
         @intCast((int >> 16) & 0xFF),
@@ -312,8 +312,8 @@ pub fn writeInt(writer: *std.io.Writer, int: i32) !void {
 
 test "testInt" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]i32{ 0, 1, 2, 127, 128, 255, std.math.maxInt(i32), -1, std.math.minInt(i32) };
     for (values) |v| {
@@ -348,13 +348,13 @@ test "testInt" {
     }
 }
 
-pub fn readLong(reader: *std.io.Reader) !i64 {
+pub fn readLong(reader: *std.Io.Reader) !i64 {
     const bytes = try reader.take(8);
     const long: i64 = @as(i64, bytes[0]) << 56 | @as(i64, bytes[1]) << 48 | @as(i64, bytes[2]) << 40 | @as(i64, bytes[3]) << 32 | @as(i64, bytes[4]) << 24 | @as(i64, bytes[5]) << 16 | @as(i64, bytes[6]) << 8 | @as(i64, bytes[7]);
     return long;
 }
 
-pub fn writeLong(writer: *std.io.Writer, long: i64) !void {
+pub fn writeLong(writer: *std.Io.Writer, long: i64) !void {
     const bytes: [8]u8 = .{
         @intCast((long >> 56) & 0xFF),
         @intCast((long >> 48) & 0xFF),
@@ -370,8 +370,8 @@ pub fn writeLong(writer: *std.io.Writer, long: i64) !void {
 
 test "testLong" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]i64{ 0, 1, 2, 127, 128, 255, std.math.maxInt(i64), -1, std.math.minInt(i64) };
     for (values) |v| {
@@ -406,13 +406,13 @@ test "testLong" {
     }
 }
 
-pub fn readFloat(reader: *std.io.Reader) !f32 {
+pub fn readFloat(reader: *std.Io.Reader) !f32 {
     const bytes = try reader.take(4);
     const int: u32 = @as(u32, bytes[0]) << 24 | @as(u32, bytes[1]) << 16 | @as(u32, bytes[2]) << 8 | @as(u32, bytes[3]);
     return @bitCast(int);
 }
 
-pub fn writeFloat(writer: *std.io.Writer, value: f32) !void {
+pub fn writeFloat(writer: *std.Io.Writer, value: f32) !void {
     const int: u32 = @bitCast(value);
     const bytes: [4]u8 = .{
         @intCast((int >> 24) & 0xFF),
@@ -425,8 +425,8 @@ pub fn writeFloat(writer: *std.io.Writer, value: f32) !void {
 
 test "testFloat" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]f32{ 0.0, 1.0, 2.0, std.math.floatMax(f32), -1.0, std.math.floatMin(f32) };
     for (values) |v| {
@@ -458,13 +458,13 @@ test "testFloat" {
     }
 }
 
-pub fn readDouble(reader: *std.io.Reader) !f64 {
+pub fn readDouble(reader: *std.Io.Reader) !f64 {
     const bytes = try reader.take(8);
     const long: u64 = @as(u64, bytes[0]) << 56 | @as(u64, bytes[1]) << 48 | @as(u64, bytes[2]) << 40 | @as(u64, bytes[3]) << 32 | @as(u64, bytes[4]) << 24 | @as(u64, bytes[5]) << 16 | @as(u64, bytes[6]) << 8 | @as(u64, bytes[7]);
     return @bitCast(long);
 }
 
-pub fn writeDouble(writer: *std.io.Writer, value: f64) !void {
+pub fn writeDouble(writer: *std.Io.Writer, value: f64) !void {
     const long: u64 = @bitCast(value);
     const bytes: [8]u8 = .{
         @intCast((long >> 56) & 0xFF),
@@ -481,8 +481,8 @@ pub fn writeDouble(writer: *std.io.Writer, value: f64) !void {
 
 test "testDouble" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]f64{ 0.0, 1.0, 2.0, std.math.floatMax(f64), -1.0, std.math.floatMin(f64) };
     for (values) |v| {
@@ -514,13 +514,13 @@ test "testDouble" {
     }
 }
 
-pub fn readUUID(reader: *std.io.Reader) !u128 {
+pub fn readUUID(reader: *std.Io.Reader) !u128 {
     const bytes = try reader.take(16);
     const uuid: u128 = @as(u128, bytes[0]) << 120 | @as(u128, bytes[1]) << 112 | @as(u128, bytes[2]) << 104 | @as(u128, bytes[3]) << 96 | @as(u128, bytes[4]) << 88 | @as(u128, bytes[5]) << 80 | @as(u128, bytes[6]) << 72 | @as(u128, bytes[7]) << 64 | @as(u128, bytes[8]) << 56 | @as(u128, bytes[9]) << 48 | @as(u128, bytes[10]) << 40 | @as(u128, bytes[11]) << 32 | @as(u128, bytes[12]) << 24 | @as(u128, bytes[13]) << 16 | @as(u128, bytes[14]) << 8 | @as(u128, bytes[15]);
     return uuid;
 }
 
-pub fn writeUUID(writer: *std.io.Writer, uuid: u128) !void {
+pub fn writeUUID(writer: *std.Io.Writer, uuid: u128) !void {
     const bytes: [16]u8 = .{
         @intCast((uuid >> 120) & 0xFF),
         @intCast((uuid >> 112) & 0xFF),
@@ -544,8 +544,8 @@ pub fn writeUUID(writer: *std.io.Writer, uuid: u128) !void {
 
 test "testUUID" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]u128{ 0, 1, 2, 127, 128, 255, std.math.maxInt(u128), std.math.minInt(u128) };
     for (values) |v| {
@@ -580,12 +580,12 @@ test "testUUID" {
 }
 
 // string representration with dashes, sometimes used
-pub fn UUIDtoString(uuid: u128) ![]const u8 {
-    const str = try std.fmt.allocPrint(std.heap.page_allocator, "{x:0>8}-{x:0>4}-{x:0>4}-{x:0>4}-{x:0>12}", .{uuid >> 96, (uuid >> 80) & 0xFFFF, (uuid >> 64) & 0xFFFF, (uuid >> 48) & 0xFFFF, uuid & 0xFFFFFFFFFFFF });
+pub fn UUIDtoString(gpa: std.mem.Allocator, uuid: u128) ![]const u8 {
+    const str = try std.fmt.allocPrint(gpa, "{x:0>8}-{x:0>4}-{x:0>4}-{x:0>4}-{x:0>12}", .{uuid >> 96, (uuid >> 80) & 0xFFFF, (uuid >> 64) & 0xFFFF, (uuid >> 48) & 0xFFFF, uuid & 0xFFFFFFFFFFFF });
     return str; // memory leak but whatever
 }
 
-pub fn readString(reader: *std.io.Reader) ![]const u8 {
+pub fn readString(reader: *std.Io.Reader) ![]const u8 {
     const length = try readVarInt(reader);
     if (length < 0) {
         return error.InvalidStringLength;
@@ -594,15 +594,15 @@ pub fn readString(reader: *std.io.Reader) ![]const u8 {
     return string;
 }
 
-pub fn writeString(writer: *std.io.Writer, string: []const u8) !void {
+pub fn writeString(writer: *std.Io.Writer, string: []const u8) !void {
     try writeVarInt(writer, @intCast(string.len));
     try writeBytes(writer, string);
 }
 
 test "testString" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_][]const u8{ "Test", "a", "", "x" ** 128 };
     for (values) |v| {
@@ -657,35 +657,35 @@ test "testStringByteLength" {
     }
 }
 
-pub fn readPacket(reader: *std.io.Reader) !struct{u8, []const u8} {
+pub fn readPacket(gpa: std.mem.Allocator, reader: *std.Io.Reader) !struct{u8, []const u8} {
     const length = try readVarInt(reader);
     if (length <= 0) {
         return error.InvalidPacketLength;
     }
     const packet_id = try readByte(reader);
-    const data = try readBytes(reader, @intCast(length - 1)); // packet_id is 1 byte
-    std.log.debug("Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ length, packet_id, data, try sanitizeString(data) });
-    return .{packet_id, data};
+    const packet_data = try readBytes(reader, @intCast(length - 1)); // packet_id is 1 byte
+    std.log.debug("Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ length, packet_id, packet_data, try sanitizeString(gpa, packet_data) });
+    return .{packet_id, packet_data};
 }
 
 // write packet and flush
-pub fn writePacket(writer: *std.io.Writer, packet_id: u8, data: []const u8) !void {
-    try writeVarInt(writer, @intCast(data.len + 1));
+pub fn writePacket(gpa: std.mem.Allocator, writer: *std.Io.Writer, packet_id: u8, packet_data: []const u8) !void {
+    try writeVarInt(writer, @intCast(packet_data.len + 1));
     try writeByte(writer, packet_id);
-    try writeBytes(writer, data);
+    try writeBytes(writer, packet_data);
     try writer.flush();
 
-    if (data.len > 10000) { // too large to print, stdout slow
-        std.log.debug("Sent large packet: length {d}, id 0x{x:0>2}", .{ data.len + 1, packet_id });
+    if (packet_data.len > 10000) { // too large to print, stdout slow
+        std.log.debug("Sent large packet: length {d}, id 0x{x:0>2}", .{ packet_data.len + 1, packet_id });
     } else {
-        std.log.debug("Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ data.len + 1, packet_id, data, try sanitizeString(data) });
+        std.log.debug("Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ packet_data.len + 1, packet_id, packet_data, try sanitizeString(gpa, packet_data) });
     }
 }
 
 test "testPacket" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]struct{u8, []const u8}{ .{0x01, "Test"}, .{0xff, ""}, .{0x10, &[_]u8{0x01, 0x02}} };
     for (values) |v| {
@@ -729,8 +729,8 @@ test "testPacket" {
 }
 
 // replace non-printable characters in a string for logging purposes
-pub fn sanitizeString(str: []const u8) ![]const u8 {
-    var sanitized = try std.heap.page_allocator.dupe(u8, str);
+pub fn sanitizeString(gpa: std.mem.Allocator, str: []const u8) ![]const u8 {
+    var sanitized = try gpa.dupe(u8, str);
     for (sanitized, 0..sanitized.len) |c, i| {
         if (c >= 32 and c < 127) {
             sanitized[i] = c;
@@ -742,7 +742,7 @@ pub fn sanitizeString(str: []const u8) ![]const u8 {
 }
 
 // note: position encoding different from modern versions, xyz vs xzy
-pub fn readPosition(reader: *std.io.Reader) !struct {i26, i12, i26} {
+pub fn readPosition(reader: *std.Io.Reader) !struct {i26, i12, i26} {
     const bytes = try reader.take(8);
     const long: i64 = @as(i64, bytes[0]) << 56 | @as(i64, bytes[1]) << 48 | @as(i64, bytes[2]) << 40 | @as(i64, bytes[3]) << 32 | @as(i64, bytes[4]) << 24 | @as(i64, bytes[5]) << 16 | @as(i64, bytes[6]) << 8 | @as(i64, bytes[7]);
     return .{
@@ -752,7 +752,7 @@ pub fn readPosition(reader: *std.io.Reader) !struct {i26, i12, i26} {
     };
 }
 
-pub fn writePosition(writer: *std.io.Writer, x: i26, y: i12, z: i26) !void {
+pub fn writePosition(writer: *std.Io.Writer, x: i26, y: i12, z: i26) !void {
     const long: i64 = ((@as(i64, x) & 0x3FFFFFF) << 38) | ((@as(i64, y) & 0xFFF) << 26) | (@as(i64, z) & 0x3FFFFFF);
     const bytes: [8]u8 = .{
         @intCast((long >> 56) & 0xFF),
@@ -769,8 +769,8 @@ pub fn writePosition(writer: *std.io.Writer, x: i26, y: i12, z: i26) !void {
 
 test "testPosition" {
     var buf: [1000]u8 = undefined;
-    var reader = std.io.Reader.fixed(&buf);
-    var writer = std.io.Writer.fixed(&buf);
+    var reader = std.Io.Reader.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]struct {i26, i12, i26}{ .{ 0, 0, 0 }, .{ 1, 2, 3 }, .{ 255, 255, 255 }, .{ -1, -2, -3 }, .{ std.math.maxInt(i26), std.math.maxInt(i12), std.math.maxInt(i26) }, .{ std.math.minInt(i26), std.math.minInt(i12), std.math.minInt(i26) } };
     for (values) |v| {
