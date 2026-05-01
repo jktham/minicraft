@@ -25,6 +25,7 @@ pub fn startServer(io: std.Io, gpa: std.mem.Allocator) !void {
     defer server.deinit(io);
 
     try world.generate();
+    player.inv = inventory.Inventory.init();
 
     std.log.info("Listening on {f}", .{server.socket.address});
     while (true) {
@@ -154,12 +155,20 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         try data.writePacket(gpa, tcp_writer, 0x23, res_writer.buffered());
         _ = res_writer.consumeAll();
 
-        // set slot
-        try data.writeByte(res_writer, 0); // window id (0 for player inventory)
-        try data.writeShort(res_writer, 36); // slot id, (36-44 for hotbar)
-        try data.writeSlot(res_writer, .{ .id = inventory.Item.IronPickaxe, .count = 1, .damage = 0, .nbt = &[_]u8{0} });
-        try data.writePacket(gpa, tcp_writer, 0x16, res_writer.buffered());
-        _ = res_writer.consumeAll();
+        try player.inv.?.setSlot(36, inventory.Stack{
+            .id = inventory.Item.IronPickaxe,
+            .count = 99,
+            .damage = 0,
+            .nbt = &[_]u8{0},
+        });
+        // set inventory
+        for (0..inventory.N_SLOTS) |i| {
+            try data.writeByte(res_writer, 0); // window id (0 for player inventory)
+            try data.writeShort(res_writer, @intCast(i)); // slot id
+            try data.writeStack(res_writer, player.inv.?.slots[i]); // slot data
+            try data.writePacket(gpa, tcp_writer, 0x16, res_writer.buffered());
+            _ = res_writer.consumeAll();
+        }
 
         // update player list
         try data.writeVarInt(res_writer, 0); // action: add
@@ -338,18 +347,18 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             _ = res_writer.consumeAll();
 
             // update item entity metadata, https://c4k3.github.io/wiki.vg/Entities.html#Item
-            const slot = inventory.Slot{
+            const stack = inventory.Stack{
                 .id = inventory.blockToItem(block),
                 .count = 1,
                 .damage = 0,
                 .nbt = &[_]u8{0},
             };
-            try entities.spawnItem(gpa, eid, uuid, position, slot);
+            try entities.spawnItem(gpa, eid, uuid, position, stack);
 
             try data.writeVarInt(res_writer, eid); // entity id
             try data.writeByte(res_writer, 6); // index (slot for items)
             try data.writeVarInt(res_writer, 5); // type (5 for slot)
-            try data.writeSlot(res_writer, slot);
+            try data.writeStack(res_writer, stack);
             try data.writeByte(res_writer, 0xff); // end of metadata
             try data.writePacket(gpa, tcp_writer, 0x3c, res_writer.buffered());
             _ = res_writer.consumeAll();
@@ -405,7 +414,7 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, s
     const time = utils.getTime(io);
     const delta = time - lastUpdate.*;
     lastUpdate.* = time;
-    std.log.debug("updateFixed: delta {d} ms", .{delta});
+    _ = delta;
 
     if (state.* == State.Play and time - lastKeepAlive.* > 10000) {
         // keep alive
@@ -420,19 +429,28 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, s
     if (state.* == State.Play and player.position != null and player.eid != null) {
         const close_items = try entities.getCloseItems(gpa, player.position.?, 1.0);
         for (close_items) |item| {
+            player.inv.?.addStack(item.stack) catch |err| {
+                if (err == error.InventoryFull) {
+                    std.log.info("Inventory full, cannot pick up item with eid {}", .{ item.eid });
+                    continue;
+                }
+            };
+
             // collect item
             try data.writeVarInt(res_writer, item.eid); // collected
             try data.writeVarInt(res_writer, player.eid.?); // collector
-            try data.writeVarInt(res_writer, item.slot.count); // count
+            try data.writeVarInt(res_writer, item.stack.count); // count
             try data.writePacket(gpa, tcp_writer, 0x4b, res_writer.buffered());
             _ = res_writer.consumeAll();
 
-            // set slot
-            try data.writeByte(res_writer, 0); // window id (0 for player inventory)
-            try data.writeShort(res_writer, 37); // slot id, (36-44 for hotbar)
-            try data.writeSlot(res_writer, item.slot); // item data
-            try data.writePacket(gpa, tcp_writer, 0x16, res_writer.buffered());
-            _ = res_writer.consumeAll();
+            // set inventory
+            for (0..inventory.N_SLOTS) |i| {
+                try data.writeByte(res_writer, 0); // window id (0 for player inventory)
+                try data.writeShort(res_writer, @intCast(i)); // slot id
+                try data.writeStack(res_writer, player.inv.?.slots[i]); // slot data
+                try data.writePacket(gpa, tcp_writer, 0x16, res_writer.buffered());
+                _ = res_writer.consumeAll();
+            }
 
             // destroy item entity
             try data.writeVarInt(res_writer, 1); // count

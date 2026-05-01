@@ -803,9 +803,9 @@ test "testPosition" {
     }
 }
 
-pub fn readSlot(reader: *std.Io.Reader) !inventory.Slot {
+pub fn readStack(reader: *std.Io.Reader) !inventory.Stack {
     const id: inventory.Item = @enumFromInt(try readShort(reader));
-    if (id == inventory.Item.Empty) {
+    if (id == inventory.Item.Empty) { // -1
         return .{ .id = inventory.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} }; // empty slot, no more data
     }
     const count = try readByte(reader);
@@ -814,28 +814,28 @@ pub fn readSlot(reader: *std.Io.Reader) !inventory.Slot {
     return .{ .id = id, .count = count, .damage = damage, .nbt = nbt };
 }
 
-pub fn writeSlot(writer: *std.Io.Writer, slot: inventory.Slot) !void {
-    try writeShort(writer, @intFromEnum(slot.id));
-    if (slot.id == inventory.Item.Empty) {
+pub fn writeStack(writer: *std.Io.Writer, stack: inventory.Stack) !void {
+    try writeShort(writer, @intFromEnum(stack.id));
+    if (stack.id == inventory.Item.Empty) {
         return; // empty slot, no more data
     }
-    try writeByte(writer, slot.count);
-    try writeShort(writer, slot.damage);
-    try writeBytes(writer, slot.nbt);
+    try writeByte(writer, stack.count);
+    try writeShort(writer, stack.damage);
+    try writeBytes(writer, stack.nbt);
 }
 
-test "testSlot" {
+test "testStack" {
     var buf: [1000]u8 = undefined;
     var reader = std.Io.Reader.fixed(&buf);
     var writer = std.Io.Writer.fixed(&buf);
 
-    const values = [_]inventory.Slot{
+    const values = [_]inventory.Stack{
         .{ .id = inventory.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} },
         .{ .id = inventory.Item.Stone, .count = 64, .damage = 0, .nbt = &[_]u8{0} },
-        .{ .id = inventory.Item.Grass, .count = 1, .damage = 5, .nbt = &[_]u8{0x01} }, // only 1-byte nbt array supported!
+        .{ .id = inventory.Item.Grass, .count = 1, .damage = 5, .nbt = &[_]u8{0x01} }, // TODO: only 1-byte nbt array supported!
     };
     for (values) |v| {
-        try writeSlot(&writer, v);
+        try writeStack(&writer, v);
     }
     try writer.flush();
 
@@ -860,7 +860,7 @@ test "testSlot" {
     }
 
     for (values, 0..) |v, i| {
-        const read_value = try readSlot(&reader);
+        const read_value = try readStack(&reader);
         std.testing.expect(std.meta.eql(.{read_value.id, read_value.count, read_value.damage}, .{v.id, v.count, v.damage})) catch |err| {
             print("read {}, expected {} at index {}\n", .{read_value, v, i});
             return err;
