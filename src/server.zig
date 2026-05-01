@@ -292,6 +292,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         if (game.player.gamemode == 1 and status == 0 or game.player.gamemode == 0 and status == 2) {
             // finish digging, set block to air
             const block = try game.world.getBlock(@intCast(pos.x), @intCast(pos.y), @intCast(pos.z));
+            std.log.info("Breaking block {} at ({}, {}, {})", .{ block, pos.x, pos.y, pos.z });
             try game.world.setBlock(@intCast(pos.x), @intCast(pos.y), @intCast(pos.z), world.Block.Air);
 
             // // spawn xp orb
@@ -315,16 +316,16 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             const eid = entities.randomEID();
             const uuid = entities.randomUUID();
             const fpos = entities.fPos{
-                .x = @floatFromInt(pos.x),
-                .y = @floatFromInt(pos.y),
-                .z = @floatFromInt(pos.z),
+                .x = @as(f32, @floatFromInt(pos.x)) + 0.5,
+                .y = @as(f32, @floatFromInt(pos.y)) + 0.5,
+                .z = @as(f32, @floatFromInt(pos.z)) + 0.5,
             };
             try data.writeVarInt(res_writer, eid); // entity id
             try data.writeUUID(res_writer, uuid); // entity uuid
             try data.writeByte(res_writer, 2); // type
-            try data.writeDouble(res_writer, fpos.x + 0.5); // x
-            try data.writeDouble(res_writer, fpos.y + 0.5); // y
-            try data.writeDouble(res_writer, fpos.z + 0.5); // z
+            try data.writeDouble(res_writer, fpos.x); // x
+            try data.writeDouble(res_writer, fpos.y); // y
+            try data.writeDouble(res_writer, fpos.z); // z
             try data.writeByte(res_writer, 0); // pitch
             try data.writeByte(res_writer, 0); // yaw
             try data.writeInt(res_writer, 1); // data
@@ -360,6 +361,49 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const cursor_y = try data.readFloat(req_reader);
         const cursor_z = try data.readFloat(req_reader);
         std.log.info("player_block_placement: position ({}, {}, {}), face {}, hand {}, cursor ({}, {}, {})", .{ pos.x, pos.y, pos.z, face, hand, cursor_x, cursor_y, cursor_z });
+
+        const slot = 36 + game.player.selected_slot; // TODO: offhand
+        const stack = game.player.inventory.slots[slot];
+        const block = inventory.itemToBlock(stack.id);
+        if (block == world.Block.Air) {
+            std.log.warn("Cannot place item {}", .{stack.id});
+            return;
+        }
+        const place_pos = world.applyFaceOffset(pos.x, pos.y, pos.z, face);
+        const place_pos_center = entities.fPos{
+            .x = @as(f64, @floatFromInt(place_pos.x)) + 0.5,
+            .y = @as(f64, @floatFromInt(place_pos.y)) + 0.5,
+            .z = @as(f64, @floatFromInt(place_pos.z)) + 0.5,
+        };
+        if (utils.distance(game.player.position, place_pos_center) > 5.0) {
+            std.log.warn("Cannot place block at ({}, {}, {}) because it is too far away", .{ place_pos.x, place_pos.y, place_pos.z });
+            return;
+        }
+        // TODO: proper collision check
+        if (utils.sameBlock(game.player.position, place_pos_center) or utils.sameBlock(.{ .x = game.player.position.x, .y = game.player.position.y + 1, .z = game.player.position.z }, place_pos_center)) {
+            std.log.warn("Cannot place block at ({}, {}, {}) because it is blocked by player", .{ place_pos.x, place_pos.y, place_pos.z });
+            return;
+        }
+        const current_block = try game.world.getBlock(place_pos.x, place_pos.y, place_pos.z);
+        if (current_block != world.Block.Air) {
+            std.log.warn("Cannot place block at ({}, {}, {}) because it is occupied by block {}", .{ place_pos.x, place_pos.y, place_pos.z, current_block });
+            return;
+        }
+        game.player.inventory.removeCount(slot, 1) catch |err| {
+            if (err == error.NotEnoughItems) {
+                std.log.warn("Not enough items in slot {}", .{slot});
+                return;
+            }
+        };
+        std.log.info("Placing block {} at ({}, {}, {})", .{ block, place_pos.x, place_pos.y, place_pos.z });
+        try game.world.setBlock(place_pos.x, place_pos.y, place_pos.z, block);
+
+        // set inventory
+        try data.writeByte(res_writer, 0); // window id (0 for player inventory)
+        try data.writeShort(res_writer, @intCast(slot)); // slot id
+        try data.writeStack(res_writer, game.player.inventory.slots[slot]); // slot data
+        try sendPacket(gpa, tcp_writer, .{ .id = 0x16, .data = res_writer.buffered() }, state.*);
+        _ = res_writer.consumeAll();
     } else if (state.* == State.Play and packet.id == 0x1d) {
         // player animation
         const hand = try data.readVarInt(req_reader);
@@ -377,6 +421,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         // player slot selection
         const slot = try data.readShort(req_reader);
         std.log.info("player_slot_selection: slot {}", .{slot});
+        game.player.selected_slot = @intCast(slot);
     } else if (state.* == State.Play and packet.id == 0x15) {
         // entity action
         const entity_id = try data.readVarInt(req_reader);
@@ -384,7 +429,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const jump_boost = try data.readVarInt(req_reader);
         std.log.info("entity_action: entity_id 0x{x}, action_id {}, jump_boost {}", .{ entity_id, action_id, jump_boost });
     } else {
-        std.log.warn("unknown packet id 0x{x:0>2} in state {s}", .{ packet.id, @tagName(state.*) });
+        std.log.warn("Unknown packet id 0x{x:0>2} in state {s}", .{ packet.id, @tagName(state.*) });
     }
 }
 
@@ -410,11 +455,11 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, g
 
     // collect nearby items
     if (state.* == State.Play) {
-        const close_items = try game.entities.getCloseItems(gpa, game.player.position, 1.0);
+        const close_items = try game.entities.getCloseItems(gpa, .{ .x = game.player.position.x, .y = game.player.position.y + 1.0, .z = game.player.position.z }, 1.2);
         for (close_items) |item| {
             game.player.inventory.addStack(item.stack) catch |err| {
                 if (err == error.InventoryFull) {
-                    std.log.info("Inventory full, cannot pick up item with eid 0x{x}", .{item.eid});
+                    std.log.warn("Inventory full, cannot pick up item with eid 0x{x}", .{item.eid});
                     continue;
                 }
             };
@@ -426,7 +471,7 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, g
             try sendPacket(gpa, tcp_writer, .{ .id = 0x4b, .data = res_writer.buffered() }, state.*);
             _ = res_writer.consumeAll();
 
-            // set inventory
+            // set inventory, TODO: only send changed slots
             for (0..inventory.N_SLOTS) |i| {
                 try data.writeByte(res_writer, 0); // window id (0 for player inventory)
                 try data.writeShort(res_writer, @intCast(i)); // slot id

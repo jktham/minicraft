@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const data = @import("data.zig");
+
 /// blockid(9) + meta(4)
 pub const palette = [_]u13{
     0b000000000_0000, // air
@@ -110,3 +112,16 @@ pub const World = struct {
         return @ptrCast(&self.chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)]);
     }
 };
+
+const EPS = 0.000001;
+pub fn applyFaceOffset(x: i32, y: i32, z: i32, face: i32) data.Position {
+    return switch (face) {
+        0 => .{ .x = @intCast(x + 0), .y = @intCast(y - 1), .z = @intCast(z + 0) },
+        1 => .{ .x = @intCast(x + 0), .y = @intCast(y + 1), .z = @intCast(z + 0) },
+        2 => .{ .x = @intCast(x + 0), .y = @intCast(y + 0), .z = @intCast(z - 1) },
+        3 => .{ .x = @intCast(x + 0), .y = @intCast(y + 0), .z = @intCast(z + 1) },
+        4 => .{ .x = @intCast(x - 1), .y = @intCast(y + 0), .z = @intCast(z + 0) },
+        5 => .{ .x = @intCast(x + 1), .y = @intCast(y + 0), .z = @intCast(z + 0) },
+        else => .{ .x = @intCast(x), .y = @intCast(y), .z = @intCast(z) },
+    };
+}

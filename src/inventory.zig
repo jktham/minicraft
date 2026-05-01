@@ -27,6 +27,19 @@ pub fn blockToItem(block: world.Block) Item {
     };
 }
 
+pub fn itemToBlock(item: Item) world.Block {
+    return switch (item) {
+        .Stone => .Stone,
+        .Grass => .Grass,
+        .Dirt => .Dirt,
+        .Cobblestone => .Cobblestone,
+        .Planks => .Planks,
+        .Sapling => .Sapling,
+        .Bedrock => .Bedrock,
+        else => .Air,
+    };
+}
+
 pub const Stack = struct {
     id: Item, // https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
     count: u8,
@@ -78,5 +91,19 @@ pub const Inventory = struct {
             }
         }
         return error.InventoryFull;
+    }
+
+    pub fn removeCount(self: *Inventory, index: usize, count: u8) !void {
+        var slot = &self.slots[index];
+        if (count > slot.count) return error.NotEnoughItems;
+
+        if (count < slot.count) {
+            slot.count -= count;
+        } else {
+            slot.count = 0;
+            slot.id = .Empty;
+            slot.damage = 0;
+            slot.nbt = &[_]u8{0};
+        }
     }
 };

@@ -9,6 +9,10 @@ pub fn distance(a: entities.fPos, b: entities.fPos) f64 {
     return std.math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+pub fn sameBlock(a: entities.fPos, b: entities.fPos) bool {
+    return @trunc(a.x) == @trunc(b.x) and @trunc(a.y) == @trunc(b.y) and @trunc(a.z) == @trunc(b.z);
+}
+
 /// get current time in milliseconds since epoch
 pub fn getTime(io: std.Io) i64 {
     return std.Io.Clock.real.now(io).toMilliseconds();

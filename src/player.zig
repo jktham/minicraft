@@ -13,6 +13,7 @@ pub const Player = struct {
     gamemode: u8,
     xp: i32,
     inventory: inventory.Inventory,
+    selected_slot: u8, // currently selected hotbar slot (0-8)
 
     pub fn init() Player {
         return .{
@@ -25,6 +26,7 @@ pub const Player = struct {
             .gamemode = 0,
             .xp = 0,
             .inventory = inventory.Inventory.init(),
+            .selected_slot = 0,
         };
     }
 };
