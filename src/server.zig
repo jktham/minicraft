@@ -1,10 +1,10 @@
 const std = @import("std");
 const data = @import("data.zig");
-const player = @import("player.zig");
 const world = @import("world.zig");
 const entities = @import("entities.zig");
 const utils = @import("utils.zig");
 const inventory = @import("inventory.zig");
+const _game = @import("game.zig");
 
 // 1.12.2 protocol: https://minecraft.wiki/w/Protocol?oldid=2772385, https://c4k3.github.io/wiki.vg/Protocol.html
 // 1.12.2 block/item/entity ids: https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
@@ -24,13 +24,13 @@ pub fn startServer(io: std.Io, gpa: std.mem.Allocator) !void {
     });
     defer server.deinit(io);
 
-    try world.generate();
-    player.inv = inventory.Inventory.init();
+    var game = _game.Game.init();
+    try game.world.generate();
 
     std.log.info("Listening on {f}", .{server.socket.address});
     while (true) {
         const client = try server.accept(io);
-        handleClient(io, gpa, client) catch |err| {
+        handleClient(io, gpa, client, &game) catch |err| {
             if (err == error.EndOfStream) {
                 std.log.info("Client disconnected: {f}", .{client.socket.address});
                 continue;
@@ -41,7 +41,7 @@ pub fn startServer(io: std.Io, gpa: std.mem.Allocator) !void {
     }
 }
 
-fn handleClient(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream) !void {
+fn handleClient(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream, game: *_game.Game) !void {
     std.log.info("Client connected: {f}", .{client.socket.address});
     defer client.close(io);
 
@@ -58,19 +58,19 @@ fn handleClient(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream) !
     var lastKeepAlive: i64 = utils.getTime(io);
 
     while (true) {
-        try updateNetwork(io, gpa, tcp_reader, tcp_writer, &state);
-        try updateFixed(io, gpa, tcp_writer, &state, &lastUpdate, &lastKeepAlive);
+        try updateNetwork(io, gpa, tcp_reader, tcp_writer, game, &state);
+        try updateFixed(io, gpa, tcp_writer, game, &state, &lastUpdate, &lastKeepAlive);
     }
 }
 
 /// on receiving a packet, update server state and send responses as needed \
 /// TODO: fix blocking behavior when no more tcp packets to read from socket
-fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_reader: *std.Io.Reader, tcp_writer: *std.Io.Writer, state: *State) !void {
+fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_reader: *std.Io.Reader, tcp_writer: *std.Io.Writer, game: *_game.Game, state: *State) !void {
     const packet_id, const packet_data = try data.readPacket(gpa, tcp_reader);
-    try processPacket(io, gpa, tcp_writer, state, packet_id, packet_data);
+    try processPacket(io, gpa, tcp_writer, game, state, packet_id, packet_data);
 }
 
-fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *State, packet_id: u8, req_data: []const u8) !void {
+fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, game: *_game.Game, state: *State, packet_id: u8, req_data: []const u8) !void {
     var r = std.Io.Reader.fixed(req_data);
     const req_reader = &r;
 
@@ -110,7 +110,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const timestamp = try data.readLong(req_reader);
         std.log.info("ping_request: timestamp {d}", .{timestamp});
 
-        player.ping = @truncate((time - timestamp) * 2);
+        game.player.ping = @truncate((time - timestamp) * 2);
 
         // pong response
         try data.writeLong(res_writer, timestamp);
@@ -122,11 +122,11 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const name = try data.readString(req_reader);
         std.log.info("hello: name {s}", .{name});
 
-        player.name = name;
-        player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
+        game.player.name = name;
+        game.player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
         // login success response (skip encryption)
-        try data.writeString(res_writer, try data.UUIDtoString(gpa, player.uuid.?)); // uuid as string
-        try data.writeString(res_writer, player.name.?); // username
+        try data.writeString(res_writer, try data.UUIDtoString(gpa, game.player.uuid)); // uuid as string
+        try data.writeString(res_writer, game.player.name); // username
         try data.writePacket(gpa, tcp_writer, 0x02, res_writer.buffered());
         _ = res_writer.consumeAll();
 
@@ -143,10 +143,10 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         _ = res_writer.consumeAll();
 
         // join game
-        player.eid = 0xbeef; // dummy entity id
-        player.gamemode = 0; // 0=survival, 1=creative
-        try data.writeInt(res_writer, player.eid.?); // entity id
-        try data.writeByte(res_writer, player.gamemode.?); // gamemode
+        game.player.eid = 0xbeef; // dummy entity id
+        game.player.gamemode = 0; // 0=survival, 1=creative
+        try data.writeInt(res_writer, game.player.eid); // entity id
+        try data.writeByte(res_writer, game.player.gamemode); // gamemode
         try data.writeInt(res_writer, 0); // dimension
         try data.writeByte(res_writer, 2); // difficulty
         try data.writeByte(res_writer, 0); // max players
@@ -155,7 +155,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         try data.writePacket(gpa, tcp_writer, 0x23, res_writer.buffered());
         _ = res_writer.consumeAll();
 
-        try player.inv.?.setSlot(36, inventory.Stack{
+        try game.player.inventory.setSlot(36, inventory.Stack{
             .id = inventory.Item.IronPickaxe,
             .count = 99,
             .damage = 0,
@@ -165,7 +165,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         for (0..inventory.N_SLOTS) |i| {
             try data.writeByte(res_writer, 0); // window id (0 for player inventory)
             try data.writeShort(res_writer, @intCast(i)); // slot id
-            try data.writeStack(res_writer, player.inv.?.slots[i]); // slot data
+            try data.writeStack(res_writer, game.player.inventory.slots[i]); // slot data
             try data.writePacket(gpa, tcp_writer, 0x16, res_writer.buffered());
             _ = res_writer.consumeAll();
         }
@@ -173,26 +173,26 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         // update player list
         try data.writeVarInt(res_writer, 0); // action: add
         try data.writeVarInt(res_writer, 1); // number of players
-        try data.writeUUID(res_writer, player.uuid.?); // player uuid
-        try data.writeString(res_writer, player.name.?); // player name
+        try data.writeUUID(res_writer, game.player.uuid); // player uuid
+        try data.writeString(res_writer, game.player.name); // player name
         try data.writeVarInt(res_writer, 0); // properties
-        try data.writeVarInt(res_writer, player.gamemode.?); // gamemode
-        try data.writeVarInt(res_writer, player.ping orelse 0); // ping
+        try data.writeVarInt(res_writer, game.player.gamemode); // gamemode
+        try data.writeVarInt(res_writer, game.player.ping); // ping
         try data.writeBool(res_writer, false); // has display name
         try data.writePacket(gpa, tcp_writer, 0x2e, res_writer.buffered());
         _ = res_writer.consumeAll();
 
         // update client position (ends loading screen)
-        const center = @as(f32, world.N_CHUNKS * world.N_BLOCKS) / 2.0;
-        if (player.position == null and player.look == null) {
-            player.position = [3]f64{ center, 20, center };
-            player.look = [2]f32{ 0, 0 };
+        if (std.mem.eql(f64, &game.player.position, &[3]f64{0, 0, 0})) { // ideally only on initial join
+            const center = @as(f32, world.N_CHUNKS * world.N_BLOCKS) / 2.0;
+            game.player.position = [3]f64{ center, 20, center };
+            game.player.look = [2]f32{ 0, 0 };
         }
-        try data.writeDouble(res_writer, player.position.?[0]); // x
-        try data.writeDouble(res_writer, player.position.?[1]); // y
-        try data.writeDouble(res_writer, player.position.?[2]); // z
-        try data.writeFloat(res_writer, player.look.?[0]); // yaw
-        try data.writeFloat(res_writer, player.look.?[1]); // pitch
+        try data.writeDouble(res_writer, game.player.position[0]); // x
+        try data.writeDouble(res_writer, game.player.position[1]); // y
+        try data.writeDouble(res_writer, game.player.position[2]); // z
+        try data.writeFloat(res_writer, game.player.look[0]); // yaw
+        try data.writeFloat(res_writer, game.player.look[1]); // pitch
         try data.writeByte(res_writer, 0b00000000); // flags (relative)
         try data.writeVarInt(res_writer, @truncate(time & 0x7FFFFFFF)); // teleport id
         try data.writePacket(gpa, tcp_writer, 0x2f, res_writer.buffered());
@@ -213,7 +213,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
                         try data.writeVarInt(chunk_writer, p); // palette entry
                     }
                     try data.writeVarInt(chunk_writer, (4096 * 8) / 64); // data length (number of longs)
-                    try data.writeBytes(chunk_writer, try world.getChunkPointer(@intCast(chunk_x), @intCast(chunk_y), @intCast(chunk_z))); // block data (4096 blocks per subchunk)
+                    try data.writeBytes(chunk_writer, try game.world.getChunkPointer(@intCast(chunk_x), @intCast(chunk_y), @intCast(chunk_z))); // block data (4096 blocks per subchunk)
                     try data.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // block light (4 bits per block)
                     try data.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // sky light (4 bits per block)
                 }
@@ -261,7 +261,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const on_ground = try data.readBool(req_reader);
         std.log.info("position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
-        player.position = [3]f64{ x, y, z };
+        game.player.position = [3]f64{ x, y, z };
 
     } else if (state.* == State.Play and packet_id == 0x0e) {
         // position and look update
@@ -273,8 +273,8 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const on_ground = try data.readBool(req_reader);
         std.log.info("position_look_update: position ({}, {}, {}), yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
-        player.position = [3]f64{ x, y, z };
-        player.look = [2]f32{ yaw, pitch };
+        game.player.position = [3]f64{ x, y, z };
+        game.player.look = [2]f32{ yaw, pitch };
 
     } else if (state.* == State.Play and packet_id == 0x0f) {
         // look update
@@ -283,7 +283,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const on_ground = try data.readBool(req_reader);
         std.log.info("look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
 
-        player.look = [2]f32{ yaw, pitch };
+        game.player.look = [2]f32{ yaw, pitch };
 
     } else if (state.* == State.Play and packet_id == 0x00) {
         // teleport confirm
@@ -302,10 +302,10 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const face = try data.readByte(req_reader);
         std.log.info("player_digging: status {}, position ({}, {}, {}), face {}", .{ status, x, y, z, face });
 
-        if (player.gamemode == 1 and status == 0 or player.gamemode == 0 and status == 2) {
+        if (game.player.gamemode == 1 and status == 0 or game.player.gamemode == 0 and status == 2) {
             // finish digging, set block to air
-            const block = try world.getBlock(@intCast(x), @intCast(y), @intCast(z));
-            try world.setBlock(@intCast(x), @intCast(y), @intCast(z), world.Block.Air);
+            const block = try game.world.getBlock(@intCast(x), @intCast(y), @intCast(z));
+            try game.world.setBlock(@intCast(x), @intCast(y), @intCast(z), world.Block.Air);
 
             // // spawn xp orb
             // try io.writeVarInt(res_writer, entities.randomEID()); // entity id
@@ -316,14 +316,11 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             // try io.writePacket(tcp_writer, 0x01, res_writer.buffered());
             // _ = res_writer.consumeAll();
 
-            if (player.xp == null) {
-                player.xp = 0;
-            }
-            player.xp.? += 1; // dummy xp amount
+            game.player.xp += 1; // dummy xp amount
             // set experience, http://minecraft.gamepedia.com/Experience%23Leveling_up
-            try data.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(player.xp.?, 10))) / 10.0); // xp bar (0.0-1.0)
-            try data.writeVarInt(res_writer, @divFloor(player.xp.?, 10)); // level
-            try data.writeVarInt(res_writer, player.xp.?); // total xp
+            try data.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(game.player.xp, 10))) / 10.0); // xp bar (0.0-1.0)
+            try data.writeVarInt(res_writer, @divFloor(game.player.xp, 10)); // level
+            try data.writeVarInt(res_writer, game.player.xp); // total xp
             try data.writePacket(gpa, tcp_writer, 0x40, res_writer.buffered());
             _ = res_writer.consumeAll();
 
@@ -353,7 +350,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
                 .damage = 0,
                 .nbt = &[_]u8{0},
             };
-            try entities.spawnItem(gpa, eid, uuid, position, stack);
+            try game.entities.spawnItem(gpa, eid, uuid, position, stack);
 
             try data.writeVarInt(res_writer, eid); // entity id
             try data.writeByte(res_writer, 6); // index (slot for items)
@@ -406,7 +403,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
 }
 
 /// once per tick, update server state and send data to client
-fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *State, lastUpdate: *i64, lastKeepAlive: *i64) !void {
+fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, game: *_game.Game, state: *State, lastUpdate: *i64, lastKeepAlive: *i64) !void {
     var res_data: [10000000]u8 = undefined;
     var w = std.Io.Writer.fixed(&res_data);
     const res_writer = &w;
@@ -426,10 +423,10 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, s
     }
 
     // collect nearby items
-    if (state.* == State.Play and player.position != null and player.eid != null) {
-        const close_items = try entities.getCloseItems(gpa, player.position.?, 1.0);
+    if (state.* == State.Play) {
+        const close_items = try game.entities.getCloseItems(gpa, game.player.position, 1.0);
         for (close_items) |item| {
-            player.inv.?.addStack(item.stack) catch |err| {
+            game.player.inventory.addStack(item.stack) catch |err| {
                 if (err == error.InventoryFull) {
                     std.log.info("Inventory full, cannot pick up item with eid {}", .{ item.eid });
                     continue;
@@ -438,7 +435,7 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, s
 
             // collect item
             try data.writeVarInt(res_writer, item.eid); // collected
-            try data.writeVarInt(res_writer, player.eid.?); // collector
+            try data.writeVarInt(res_writer, game.player.eid); // collector
             try data.writeVarInt(res_writer, item.stack.count); // count
             try data.writePacket(gpa, tcp_writer, 0x4b, res_writer.buffered());
             _ = res_writer.consumeAll();
@@ -447,7 +444,7 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, s
             for (0..inventory.N_SLOTS) |i| {
                 try data.writeByte(res_writer, 0); // window id (0 for player inventory)
                 try data.writeShort(res_writer, @intCast(i)); // slot id
-                try data.writeStack(res_writer, player.inv.?.slots[i]); // slot data
+                try data.writeStack(res_writer, game.player.inventory.slots[i]); // slot data
                 try data.writePacket(gpa, tcp_writer, 0x16, res_writer.buffered());
                 _ = res_writer.consumeAll();
             }
@@ -458,7 +455,7 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, s
             try data.writePacket(gpa, tcp_writer, 0x32, res_writer.buffered());
             _ = res_writer.consumeAll();
 
-            try entities.destroyItem(item.eid);
+            try game.entities.destroyItem(item.eid);
         }
     }
 }
