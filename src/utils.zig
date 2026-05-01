@@ -1,13 +1,28 @@
 const std = @import("std");
 
-pub fn distance(a: [3]f64, b: [3]f64) f64 {
-    const dx = a[0] - b[0];
-    const dy = a[1] - b[1];
-    const dz = a[2] - b[2];
+const entities = @import("entities.zig");
+
+pub fn distance(a: entities.fPos, b: entities.fPos) f64 {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    const dz = a.z - b.z;
     return std.math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 /// get current time in milliseconds since epoch
 pub fn getTime(io: std.Io) i64 {
     return std.Io.Clock.real.now(io).toMilliseconds();
+}
+
+/// replace non-printable characters in a string for logging purposes
+pub fn sanitizeString(gpa: std.mem.Allocator, str: []const u8) ![]const u8 {
+    var sanitized = try gpa.dupe(u8, str);
+    for (sanitized, 0..sanitized.len) |c, i| {
+        if (c >= 32 and c < 127) {
+            sanitized[i] = c;
+        } else {
+            sanitized[i] = '?';
+        }
+    }
+    return sanitized;
 }

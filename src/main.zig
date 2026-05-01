@@ -13,9 +13,14 @@ pub const std_options: std.Options = .{
     // .log_level = std.log.Level.debug,
 };
 
-pub const muted_keywords = [_][]const u8{
-    "length 2, id 0x1d, data 0x00",
-    "player_animation",
+var log_gpa: std.heap.DebugAllocator(.{}) = .init;
+const log_allocator = log_gpa.allocator();
+
+const muted_keywords = [_][]const u8{
+    "0x1d/03", "player_animation",
+    "0x0d/03", "position_update",
+    "0x0e/03", "position_look_update",
+    "0x0f/03", "look_update",
 };
 
 pub fn colorLogFn(
@@ -24,10 +29,8 @@ pub fn colorLogFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = gpa.allocator();
-    const message_str = std.fmt.allocPrint(allocator, format, args) catch return;
-    defer allocator.free(message_str);
+    const message_str = std.fmt.allocPrint(log_allocator, format, args) catch return;
+    defer log_allocator.free(message_str);
     for (muted_keywords) |keyword| {
         if (std.mem.containsAtLeast(u8, message_str, 1, keyword)) {
             return;
