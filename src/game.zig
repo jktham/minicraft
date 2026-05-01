@@ -1,8 +1,9 @@
 const std = @import("std");
-const player = @import("player.zig");
-const inventory = @import("inventory.zig");
-const world = @import("world.zig");
+
 const entities = @import("entities.zig");
+const inventory = @import("inventory.zig");
+const player = @import("player.zig");
+const world = @import("world.zig");
 
 pub const Game = struct {
     player: player.Player,

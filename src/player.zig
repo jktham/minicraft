@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const inventory = @import("inventory.zig");
 
 pub const Player = struct {
@@ -18,8 +19,8 @@ pub const Player = struct {
             .uuid = 0,
             .name = "",
             .ping = 0,
-            .position = [_]f64{0, 0, 0},
-            .look = [_]f32{0, 0},
+            .position = [_]f64{ 0, 0, 0 },
+            .look = [_]f32{ 0, 0 },
             .gamemode = 0,
             .xp = 0,
             .inventory = inventory.Inventory.init(),

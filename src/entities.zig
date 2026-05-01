@@ -1,6 +1,7 @@
 const std = @import("std");
-const utils = @import("utils.zig");
+
 const inventory = @import("inventory.zig");
+const utils = @import("utils.zig");
 
 pub const ItemEntity = struct {
     eid: i32,
@@ -39,7 +40,7 @@ pub const Entities = struct {
     }
 
     pub fn destroyItem(self: *Entities, eid: i32) !void {
-        std.log.info("Destroying item entity with eid {}", .{ eid });
+        std.log.info("Destroying item entity with eid {}", .{eid});
         for (self.items.items, 0..) |item, i| {
             if (item.eid == eid) {
                 _ = self.items.swapRemove(i);

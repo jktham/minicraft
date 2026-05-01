@@ -1,10 +1,11 @@
 const std = @import("std");
-const data = @import("data.zig");
-const world = @import("world.zig");
-const entities = @import("entities.zig");
-const utils = @import("utils.zig");
-const inventory = @import("inventory.zig");
+
 const _game = @import("game.zig");
+const data = @import("data.zig");
+const entities = @import("entities.zig");
+const inventory = @import("inventory.zig");
+const utils = @import("utils.zig");
+const world = @import("world.zig");
 
 // 1.12.2 protocol: https://minecraft.wiki/w/Protocol?oldid=2772385, https://c4k3.github.io/wiki.vg/Protocol.html
 // 1.12.2 block/item/entity ids: https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
@@ -52,7 +53,7 @@ fn handleClient(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream, g
     var write_buf: [10000]u8 = undefined;
     var w = client.writer(io, &write_buf);
     const tcp_writer: *std.Io.Writer = &w.interface;
-    
+
     var state: State = State.Handshaking;
     var lastUpdate: i64 = utils.getTime(io);
     var lastKeepAlive: i64 = utils.getTime(io);
@@ -93,7 +94,6 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         } else if (intent == 2) {
             setState(state, State.Login);
         }
-
     } else if (state.* == State.Status and packet_id == 0x00) {
         // status request
         std.log.info("status_request", .{});
@@ -104,7 +104,6 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         try data.writeString(res_writer, status);
         try data.writePacket(gpa, tcp_writer, 0x00, res_writer.buffered());
         _ = res_writer.consumeAll();
-
     } else if (state.* == State.Status and packet_id == 0x01) {
         // ping request
         const timestamp = try data.readLong(req_reader);
@@ -116,7 +115,6 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         try data.writeLong(res_writer, timestamp);
         try data.writePacket(gpa, tcp_writer, 0x01, res_writer.buffered());
         _ = res_writer.consumeAll();
-
     } else if (state.* == State.Login and packet_id == 0x00) {
         // hello request
         const name = try data.readString(req_reader);
@@ -185,7 +183,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         _ = res_writer.consumeAll();
 
         // update client position (ends loading screen)
-        if (std.mem.eql(f64, &game.player.position, &[3]f64{0, 0, 0})) { // ideally only on initial join
+        if (std.mem.eql(f64, &game.player.position, &[3]f64{ 0, 0, 0 })) { // ideally only on initial join
             const center = @as(f32, world.N_CHUNKS * world.N_BLOCKS) / 2.0;
             game.player.position = [3]f64{ center, 20, center };
             game.player.look = [2]f32{ 0, 0 };
@@ -232,7 +230,6 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
                 _ = res_writer.consumeAll();
             }
         }
-
     } else if (state.* == State.Play and packet_id == 0x04) {
         // client settings
         const locale = try data.readString(req_reader);
@@ -242,19 +239,16 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const skin_parts = try data.readByte(req_reader);
         const main_hand = try data.readVarInt(req_reader);
         std.log.info("client_settings: locale {s}, view_distance {d}, chat_mode {d}, chat_colors {}, skin_parts {d}, main_hand {d}", .{ locale, view_distance, chat_mode, chat_colors, skin_parts, main_hand });
-
     } else if (state.* == State.Play and packet_id == 0x09) {
         // plugin message
         const channel = try data.readString(req_reader);
         const payload = try req_reader.allocRemaining(gpa, std.Io.Limit.unlimited); // unknown size
         defer gpa.free(payload);
         std.log.info("plugin_message: channel {s}, payload 0x{x} ({s})", .{ channel, payload, try data.sanitizeString(gpa, payload) });
-
     } else if (state.* == State.Play and packet_id == 0x0c) {
         // player update
         const on_ground = try data.readBool(req_reader);
-        std.log.info("player_update: on_ground {}", .{ on_ground });
-
+        std.log.info("player_update: on_ground {}", .{on_ground});
     } else if (state.* == State.Play and packet_id == 0x0d) {
         // position update
         const x = try data.readDouble(req_reader);
@@ -264,7 +258,6 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         std.log.info("position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
         game.player.position = [3]f64{ x, y, z };
-
     } else if (state.* == State.Play and packet_id == 0x0e) {
         // position and look update
         const x = try data.readDouble(req_reader);
@@ -277,7 +270,6 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
 
         game.player.position = [3]f64{ x, y, z };
         game.player.look = [2]f32{ yaw, pitch };
-
     } else if (state.* == State.Play and packet_id == 0x0f) {
         // look update
         const yaw = try data.readFloat(req_reader);
@@ -286,17 +278,14 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         std.log.info("look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
 
         game.player.look = [2]f32{ yaw, pitch };
-
     } else if (state.* == State.Play and packet_id == 0x00) {
         // teleport confirm
         const teleport_id = try data.readVarInt(req_reader);
         std.log.info("teleport_confirm: id {}", .{teleport_id});
-
     } else if (state.* == State.Play and packet_id == 0x0b) {
         // keep alive
         const id = try data.readLong(req_reader);
         std.log.info("keep_alive: id {}", .{id});
-
     } else if (state.* == State.Play and packet_id == 0x14) {
         // player digging
         const status = try data.readVarInt(req_reader);
@@ -361,9 +350,7 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             try data.writeByte(res_writer, 0xff); // end of metadata
             try data.writePacket(gpa, tcp_writer, 0x3c, res_writer.buffered());
             _ = res_writer.consumeAll();
-
         }
-
     } else if (state.* == State.Play and packet_id == 0x1f) {
         // player block placement
         const x, const y, const z = try data.readPosition(req_reader);
@@ -373,7 +360,6 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const cursor_y = try data.readFloat(req_reader);
         const cursor_z = try data.readFloat(req_reader);
         std.log.info("player_block_placement: position ({}, {}, {}), face {}, hand {}, cursor ({}, {}, {})", .{ x, y, z, face, hand, cursor_x, cursor_y, cursor_z });
-
     } else if (state.* == State.Play and packet_id == 0x1d) {
         // player animation
         const hand = try data.readVarInt(req_reader);
@@ -391,14 +377,12 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         // player slot selection
         const slot = try data.readShort(req_reader);
         std.log.info("player_slot_selection: slot {}", .{slot});
-
     } else if (state.* == State.Play and packet_id == 0x15) {
         // entity action
         const entity_id = try data.readVarInt(req_reader);
         const action_id = try data.readVarInt(req_reader);
         const jump_boost = try data.readVarInt(req_reader);
         std.log.info("entity_action: entity_id {}, action_id {}, jump_boost {}", .{ entity_id, action_id, jump_boost });
-
     } else {
         std.log.warn("unknown packet id 0x{x:0>2} in state {s}", .{ packet_id, @tagName(state.*) });
     }
@@ -430,7 +414,7 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, g
         for (close_items) |item| {
             game.player.inventory.addStack(item.stack) catch |err| {
                 if (err == error.InventoryFull) {
-                    std.log.info("Inventory full, cannot pick up item with eid {}", .{ item.eid });
+                    std.log.info("Inventory full, cannot pick up item with eid {}", .{item.eid});
                     continue;
                 }
             };

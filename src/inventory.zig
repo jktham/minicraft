@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const world = @import("world.zig");
 
 pub const Item = enum(i16) {
@@ -41,7 +42,7 @@ pub const Inventory = struct {
 
     pub fn init() Inventory {
         return .{
-            .slots = [_]Stack{ .{ .id = .Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} } } ** N_SLOTS,
+            .slots = [_]Stack{.{ .id = .Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} }} ** N_SLOTS,
         };
     }
 

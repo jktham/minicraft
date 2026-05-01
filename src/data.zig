@@ -1,5 +1,6 @@
 const std = @import("std");
 const print = std.debug.print;
+
 const inventory = @import("inventory.zig");
 
 test "testBuf" {
@@ -14,7 +15,7 @@ test "testBuf" {
     for (values, 0..) |v, i| {
         const read_value = try reader.takeByte();
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -42,7 +43,7 @@ test "testByte" {
     for (values, 0..) |v, i| {
         const read_value = try readByte(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -61,19 +62,21 @@ test "testBytes" {
     var reader = std.Io.Reader.fixed(&buf);
     var writer = std.Io.Writer.fixed(&buf);
 
-    const values = [_][]const u8{ &[_]u8{0}, &[_]u8{1, 2, 3}, &[_]u8{} };
+    const values = [_][]const u8{ &[_]u8{0}, &[_]u8{ 1, 2, 3 }, &[_]u8{} };
     for (values) |v| {
         try writeBytes(&writer, v);
     }
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000,
         0b00000001, 0b00000010, 0b00000011,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -81,7 +84,7 @@ test "testBytes" {
     for (values, 0..) |v, i| {
         const read_value = try readBytes(&reader, v.len);
         std.testing.expect(std.mem.eql(u8, read_value, v)) catch |err| {
-            print("read 0x{x}, expected 0x{x} at index {}\n", .{read_value, v, i});
+            print("read 0x{x}, expected 0x{x} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -114,12 +117,14 @@ test "testBool" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000,
         0b00000001,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -127,7 +132,7 @@ test "testBool" {
     for (values, 0..) |v, i| {
         const read_value = try readBool(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -188,6 +193,7 @@ test "testVarInt" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000,
         0b00000001,
         0b00000010,
@@ -197,10 +203,11 @@ test "testVarInt" {
         0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b00000111,
         0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b00001111,
         0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b00001000,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -208,12 +215,12 @@ test "testVarInt" {
     for (values, 0..) |v, i| {
         const read_value = try readVarInt(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
 
-    try writeBytes(&writer, &[_]u8{0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b00000000}); // invalid VarInt (too long)
+    try writeBytes(&writer, &[_]u8{ 0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b00000000 }); // invalid VarInt (too long)
     try writer.flush();
     try std.testing.expectError(error.InvalidVarInt, readVarInt(&reader));
 }
@@ -237,7 +244,7 @@ test "testVarIntByteLength" {
     for (values, 0..) |v, i| {
         const length = computeVarIntByteLength(v);
         std.testing.expect(length == expected_lengths[i]) catch |err| {
-            print("computed {}, expected {} at index {}\n", .{length, expected_lengths[i], i});
+            print("computed {}, expected {} at index {}\n", .{ length, expected_lengths[i], i });
             return err;
         };
     }
@@ -269,6 +276,7 @@ test "testShort" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000, 0b00000000,
         0b00000000, 0b00000001,
         0b00000000, 0b00000010,
@@ -278,10 +286,11 @@ test "testShort" {
         0b01111111, 0b11111111,
         0b11111111, 0b11111111,
         0b10000000, 0b00000000,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -289,7 +298,7 @@ test "testShort" {
     for (values, 0..) |v, i| {
         const read_value = try readShort(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -323,6 +332,7 @@ test "testInt" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b00000000, 0b00000000, 0b00000000, 0b00000001,
         0b00000000, 0b00000000, 0b00000000, 0b00000010,
@@ -332,10 +342,11 @@ test "testInt" {
         0b01111111, 0b11111111, 0b11111111, 0b11111111,
         0b11111111, 0b11111111, 0b11111111, 0b11111111,
         0b10000000, 0b00000000, 0b00000000, 0b00000000,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -343,7 +354,7 @@ test "testInt" {
     for (values, 0..) |v, i| {
         const read_value = try readInt(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -381,6 +392,7 @@ test "testLong" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000001,
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000010,
@@ -390,10 +402,11 @@ test "testLong" {
         0b01111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
         0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
         0b10000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -401,7 +414,7 @@ test "testLong" {
     for (values, 0..) |v, i| {
         const read_value = try readLong(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -436,16 +449,18 @@ test "testFloat" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b00111111, 0b10000000, 0b00000000, 0b00000000,
         0b01000000, 0b00000000, 0b00000000, 0b00000000,
         0b01111111, 0b01111111, 0b11111111, 0b11111111,
         0b10111111, 0b10000000, 0b00000000, 0b00000000,
         0b00000000, 0b10000000, 0b00000000, 0b00000000,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -453,7 +468,7 @@ test "testFloat" {
     for (values, 0..) |v, i| {
         const read_value = try readFloat(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -492,16 +507,18 @@ test "testDouble" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b00111111, 0b11110000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b01000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b01111111, 0b11101111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
         0b10111111, 0b11110000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b00000000, 0b00010000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -509,7 +526,7 @@ test "testDouble" {
     for (values, 0..) |v, i| {
         const read_value = try readDouble(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -555,6 +572,7 @@ test "testUUID" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000001,
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000010,
@@ -563,10 +581,11 @@ test "testUUID" {
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b11111111,
         0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -574,7 +593,7 @@ test "testUUID" {
     for (values, 0..) |v, i| {
         const read_value = try readUUID(&reader);
         std.testing.expect(read_value == v) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -582,7 +601,7 @@ test "testUUID" {
 
 // string representration with dashes, sometimes used
 pub fn UUIDtoString(gpa: std.mem.Allocator, uuid: u128) ![]const u8 {
-    const str = try std.fmt.allocPrint(gpa, "{x:0>8}-{x:0>4}-{x:0>4}-{x:0>4}-{x:0>12}", .{uuid >> 96, (uuid >> 80) & 0xFFFF, (uuid >> 64) & 0xFFFF, (uuid >> 48) & 0xFFFF, uuid & 0xFFFFFFFFFFFF });
+    const str = try std.fmt.allocPrint(gpa, "{x:0>8}-{x:0>4}-{x:0>4}-{x:0>4}-{x:0>12}", .{ uuid >> 96, (uuid >> 80) & 0xFFFF, (uuid >> 64) & 0xFFFF, (uuid >> 48) & 0xFFFF, uuid & 0xFFFFFFFFFFFF });
     return str; // memory leak but whatever
 }
 
@@ -612,6 +631,7 @@ test "testString" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000100,
         'T', 'e', 's', 't',
         0b00000001,
@@ -620,10 +640,11 @@ test "testString" {
 
         0b10000000, 0b00000001,
         'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x',
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -631,7 +652,7 @@ test "testString" {
     for (values, 0..) |v, i| {
         const read_value = try readString(&reader);
         std.testing.expect(std.mem.eql(u8, read_value, v)) catch |err| {
-            print("read {s}, expected {s} at index {}\n", .{read_value, v, i});
+            print("read {s}, expected {s} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -652,13 +673,13 @@ test "testStringByteLength" {
     for (values, 0..) |v, i| {
         const length = computeStringByteLength(v);
         std.testing.expect(length == expected_lengths[i]) catch |err| {
-            print("computed {}, expected {} at index {}\n", .{length, expected_lengths[i], i});
+            print("computed {}, expected {} at index {}\n", .{ length, expected_lengths[i], i });
             return err;
         };
     }
 }
 
-pub fn readPacket(gpa: std.mem.Allocator, reader: *std.Io.Reader) !struct{u8, []const u8} {
+pub fn readPacket(gpa: std.mem.Allocator, reader: *std.Io.Reader) !struct { u8, []const u8 } {
     const length = try readVarInt(reader);
     if (length <= 0) {
         return error.InvalidPacketLength;
@@ -668,7 +689,7 @@ pub fn readPacket(gpa: std.mem.Allocator, reader: *std.Io.Reader) !struct{u8, []
     const str = try sanitizeString(gpa, packet_data);
     defer gpa.free(str);
     std.log.debug("Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ length, packet_id, packet_data, str });
-    return .{packet_id, packet_data};
+    return .{ packet_id, packet_data };
 }
 
 /// write packet and flush
@@ -692,13 +713,14 @@ test "testPacket" {
     var reader = std.Io.Reader.fixed(&buf);
     var writer = std.Io.Writer.fixed(&buf);
 
-    const values = [_]struct{u8, []const u8}{ .{0x01, "Test"}, .{0xff, ""}, .{0x10, &[_]u8{0x01, 0x02}} };
+    const values = [_]struct { u8, []const u8 }{ .{ 0x01, "Test" }, .{ 0xff, "" }, .{ 0x10, &[_]u8{ 0x01, 0x02 } } };
     for (values) |v| {
         try writePacket(std.heap.smp_allocator, &writer, v[0], v[1]);
     }
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000101,
         0b00000001,
         'T', 'e', 's', 't',
@@ -708,10 +730,11 @@ test "testPacket" {
         0b00000011,
         0b00010000,
         0b00000001, 0b00000010,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -719,11 +742,11 @@ test "testPacket" {
     for (values, 0..) |v, i| {
         const read_value = try readPacket(std.heap.smp_allocator, &reader);
         std.testing.expect(read_value[0] == v[0]) catch |err| {
-            print("read 0x{x:0>2}, expected 0x{x:0>2} at index {}\n", .{read_value[0], v[0], i});
+            print("read 0x{x:0>2}, expected 0x{x:0>2} at index {}\n", .{ read_value[0], v[0], i });
             return err;
         };
         std.testing.expect(std.mem.eql(u8, read_value[1], v[1])) catch |err| {
-            print("read 0x{x}, expected 0x{x} at index {}\n", .{read_value[1], v[1], i});
+            print("read 0x{x}, expected 0x{x} at index {}\n", .{ read_value[1], v[1], i });
             return err;
         };
     }
@@ -747,7 +770,7 @@ pub fn sanitizeString(gpa: std.mem.Allocator, str: []const u8) ![]const u8 {
 }
 
 // note: position encoding different from modern versions, xyz vs xzy
-pub fn readPosition(reader: *std.Io.Reader) !struct {i26, i12, i26} {
+pub fn readPosition(reader: *std.Io.Reader) !struct { i26, i12, i26 } {
     const bytes = try reader.take(8);
     const long: i64 = @as(i64, bytes[0]) << 56 | @as(i64, bytes[1]) << 48 | @as(i64, bytes[2]) << 40 | @as(i64, bytes[3]) << 32 | @as(i64, bytes[4]) << 24 | @as(i64, bytes[5]) << 16 | @as(i64, bytes[6]) << 8 | @as(i64, bytes[7]);
     return .{
@@ -777,23 +800,25 @@ test "testPosition" {
     var reader = std.Io.Reader.fixed(&buf);
     var writer = std.Io.Writer.fixed(&buf);
 
-    const values = [_]struct {i26, i12, i26}{ .{ 0, 0, 0 }, .{ 1, 2, 3 }, .{ 255, 255, 255 }, .{ -1, -2, -3 }, .{ std.math.maxInt(i26), std.math.maxInt(i12), std.math.maxInt(i26) }, .{ std.math.minInt(i26), std.math.minInt(i12), std.math.minInt(i26) } };
+    const values = [_]struct { i26, i12, i26 }{ .{ 0, 0, 0 }, .{ 1, 2, 3 }, .{ 255, 255, 255 }, .{ -1, -2, -3 }, .{ std.math.maxInt(i26), std.math.maxInt(i12), std.math.maxInt(i26) }, .{ std.math.minInt(i26), std.math.minInt(i12), std.math.minInt(i26) } };
     for (values) |v| {
         try writePosition(&writer, v[0], v[1], v[2]);
     }
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
         0b00000000, 0b00000000, 0b00000000, 0b01000000, 0b00001000, 0b00000000, 0b00000000, 0b00000011,
         0b00000000, 0b00000000, 0b00111111, 0b11000011, 0b11111100, 0b00000000, 0b00000000, 0b11111111,
         0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111011, 0b11111111, 0b11111111, 0b11111101,
         0b01111111, 0b11111111, 0b11111111, 0b11011111, 0b11111101, 0b11111111, 0b11111111, 0b11111111,
         0b10000000, 0b00000000, 0b00000000, 0b00100000, 0b00000010, 0b00000000, 0b00000000, 0b00000000,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
@@ -801,7 +826,7 @@ test "testPosition" {
     for (values, 0..) |v, i| {
         const read_value = try readPosition(&reader);
         std.testing.expect(std.mem.eql(i64, &read_value, &v)) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
     }
@@ -844,6 +869,7 @@ test "testStack" {
     try writer.flush();
 
     const bytes = [_]u8{
+        // zig fmt: off
         0b11111111, 0b11111111,
 
         0b00000000, 0b00000001,
@@ -855,22 +881,23 @@ test "testStack" {
         0b00000001,
         0b00000000, 0b00000101,
         0b00000001,
+        // zig fmt: on
     };
     for (bytes, 0..) |b, i| {
         std.testing.expect(buf[i] == b) catch |err| {
-            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{buf[i], b, i});
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }
 
     for (values, 0..) |v, i| {
         const read_value = try readStack(&reader);
-        std.testing.expect(std.meta.eql(.{read_value.id, read_value.count, read_value.damage}, .{v.id, v.count, v.damage})) catch |err| {
-            print("read {}, expected {} at index {}\n", .{read_value, v, i});
+        std.testing.expect(std.meta.eql(.{ read_value.id, read_value.count, read_value.damage }, .{ v.id, v.count, v.damage })) catch |err| {
+            print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };
         std.testing.expect(std.mem.eql(u8, read_value.nbt, v.nbt)) catch |err| {
-            print("read 0x{x}, expected 0x{x} at index {}\n", .{read_value.nbt, v.nbt, i});
+            print("read 0x{x}, expected 0x{x} at index {}\n", .{ read_value.nbt, v.nbt, i });
             return err;
         };
     }
