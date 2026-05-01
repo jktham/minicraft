@@ -665,7 +665,9 @@ pub fn readPacket(gpa: std.mem.Allocator, reader: *std.Io.Reader) !struct{u8, []
     }
     const packet_id = try readByte(reader);
     const packet_data = try readBytes(reader, @intCast(length - 1)); // packet_id is 1 byte
-    std.log.debug("Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ length, packet_id, packet_data, try sanitizeString(gpa, packet_data) });
+    const str = try sanitizeString(gpa, packet_data);
+    defer gpa.free(str);
+    std.log.debug("Received packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ length, packet_id, packet_data, str });
     return .{packet_id, packet_data};
 }
 
@@ -679,7 +681,9 @@ pub fn writePacket(gpa: std.mem.Allocator, writer: *std.Io.Writer, packet_id: u8
     if (packet_data.len > 10000) { // too large to print, stdout slow
         std.log.debug("Sent large packet: length {d}, id 0x{x:0>2}", .{ packet_data.len + 1, packet_id });
     } else {
-        std.log.debug("Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ packet_data.len + 1, packet_id, packet_data, try sanitizeString(gpa, packet_data) });
+        const str = try sanitizeString(gpa, packet_data);
+        defer gpa.free(str);
+        std.log.debug("Sent packet: length {d}, id 0x{x:0>2}, data 0x{x} ({s})", .{ packet_data.len + 1, packet_id, packet_data, str });
     }
 }
 

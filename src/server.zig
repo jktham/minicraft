@@ -125,7 +125,9 @@ fn processPacket(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         game.player.name = name;
         game.player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
         // login success response (skip encryption)
-        try data.writeString(res_writer, try data.UUIDtoString(gpa, game.player.uuid)); // uuid as string
+        const uuid_str = try data.UUIDtoString(gpa, game.player.uuid);
+        defer gpa.free(uuid_str);
+        try data.writeString(res_writer, uuid_str); // uuid as string
         try data.writeString(res_writer, game.player.name); // username
         try data.writePacket(gpa, tcp_writer, 0x02, res_writer.buffered());
         _ = res_writer.consumeAll();
