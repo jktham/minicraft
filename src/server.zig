@@ -3,6 +3,7 @@ const std = @import("std");
 const _game = @import("game.zig");
 const data = @import("data.zig");
 const entities = @import("entities.zig");
+const ids = @import("ids.zig");
 const inventory = @import("inventory.zig");
 const utils = @import("utils.zig");
 const world = @import("world.zig");
@@ -151,7 +152,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         _ = res_writer.consumeAll();
 
         game.player.inventory.slots[36] = inventory.Stack{
-            .id = inventory.Item.IronPickaxe,
+            .id = ids.Item.IronPickaxe,
             .count = 99,
             .damage = 0,
             .nbt = &[_]u8{0},
@@ -172,6 +173,8 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         try data.writeVarInt(res_writer, game.player.xp); // total xp
         try sendPacket(gpa, tcp_writer, .{ .id = 0x40, .data = res_writer.buffered() }, state.*);
         _ = res_writer.consumeAll();
+
+        // TODO: send item entities
 
         // update player list
         try data.writeVarInt(res_writer, 0); // action: add
@@ -211,8 +214,8 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
 
                 for (0..world.N_SUBCHUNKS) |chunk_y| {
                     try data.writeByte(chunk_writer, 8); // bits per block
-                    try data.writeVarInt(chunk_writer, world.palette.len); // palette length
-                    for (world.palette) |p| {
+                    try data.writeVarInt(chunk_writer, ids.palette.len); // palette length
+                    for (ids.palette) |p| {
                         try data.writeVarInt(chunk_writer, p); // palette entry
                     }
                     try data.writeVarInt(chunk_writer, (4096 * 8) / 64); // data length (number of longs)
@@ -298,13 +301,24 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
 
         if (game.player.gamemode == 1 and status == 0 or game.player.gamemode == 0 and status == 2) { // TODO: saplings are broken without sending end digging
             // finish digging, set block to air
-            const block = try game.world.getBlock(@intCast(pos.x), @intCast(pos.y), @intCast(pos.z));
+            const block = game.world.getBlock(@intCast(pos.x), @intCast(pos.y), @intCast(pos.z)) catch |err| {
+                std.log.warn("Error getting block at ({}, {}, {}): {}", .{ pos.x, pos.y, pos.z, err });
+                return;
+            };
+            if (block == ids.Block.Air) {
+                std.log.warn("Attempted to break air at ({}, {}, {})", .{ pos.x, pos.y, pos.z });
+                return;
+            }
             std.log.info("Breaking block {} at ({}, {}, {})", .{ block, pos.x, pos.y, pos.z });
-            try game.world.setBlock(@intCast(pos.x), @intCast(pos.y), @intCast(pos.z), world.Block.Air);
+
+            game.world.setBlock(@intCast(pos.x), @intCast(pos.y), @intCast(pos.z), ids.Block.Air) catch |err| {
+                std.log.warn("Error setting block at ({}, {}, {}): {}", .{ pos.x, pos.y, pos.z, err });
+                return;
+            };
 
             // block change response
             try data.writePosition(res_writer, pos); // position
-            try data.writeVarInt(res_writer, world.palette[@intFromEnum(world.Block.Air)]); // block id
+            try data.writeVarInt(res_writer, ids.palette[@intFromEnum(ids.Block.Air)]); // block id
             try sendPacket(gpa, tcp_writer, .{ .id = 0x0B, .data = res_writer.buffered() }, state.*);
             _ = res_writer.consumeAll();
 
@@ -350,7 +364,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
 
             // update item entity metadata, https://c4k3.github.io/wiki.vg/Entities.html#Item
             const stack = inventory.Stack{
-                .id = inventory.blockToItem(block),
+                .id = block.toItem(),
                 .count = 1,
                 .damage = 0,
                 .nbt = &[_]u8{0},
@@ -366,7 +380,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             _ = res_writer.consumeAll();
         }
     } else if (state.* == State.Play and packet.id == 0x1f) {
-        // player block placement
+        // player block placement, TODO: make this a single robust function somewhere that handles all the error cases
         const pos = try data.readPosition(req_reader);
         const face = try data.readVarInt(req_reader);
         const hand = try data.readVarInt(req_reader);
@@ -377,9 +391,9 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
 
         const slot = 36 + game.player.selected_slot; // TODO: offhand
         const stack = game.player.inventory.slots[slot];
-        const block = inventory.itemToBlock(stack.id);
-        if (block == world.Block.Air) {
-            std.log.warn("Cannot place item {}", .{stack.id});
+        const block = stack.id.toBlock();
+        if (block == ids.Block.Air) {
+            std.log.warn("Cannot place item {}", .{stack.id}); // TODO: send block change for failed placement
             return;
         }
         const place_pos = world.applyFaceOffset(pos.x, pos.y, pos.z, face);
@@ -397,8 +411,11 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             std.log.warn("Cannot place block at ({}, {}, {}) because it is blocked by player", .{ place_pos.x, place_pos.y, place_pos.z });
             return;
         }
-        const current_block = try game.world.getBlock(place_pos.x, place_pos.y, place_pos.z);
-        if (current_block != world.Block.Air) {
+        const current_block = game.world.getBlock(place_pos.x, place_pos.y, place_pos.z) catch |err| {
+            std.log.warn("Error getting block at ({}, {}, {}): {}", .{ place_pos.x, place_pos.y, place_pos.z, err });
+            return;
+        };
+        if (current_block != ids.Block.Air) {
             std.log.warn("Cannot place block at ({}, {}, {}) because it is occupied by block {}", .{ place_pos.x, place_pos.y, place_pos.z, current_block });
             return;
         }
@@ -409,11 +426,14 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             }
         };
         std.log.info("Placing block {} at ({}, {}, {})", .{ block, place_pos.x, place_pos.y, place_pos.z });
-        try game.world.setBlock(place_pos.x, place_pos.y, place_pos.z, block);
+        game.world.setBlock(place_pos.x, place_pos.y, place_pos.z, block) catch |err| {
+            std.log.warn("Error setting block at ({}, {}, {}): {}", .{ place_pos.x, place_pos.y, place_pos.z, err });
+            return;
+        };
 
         // block change response
         try data.writePosition(res_writer, place_pos); // position
-        try data.writeVarInt(res_writer, world.palette[@intFromEnum(block)]); // block id
+        try data.writeVarInt(res_writer, ids.palette[@intFromEnum(block)]); // block id
         try sendPacket(gpa, tcp_writer, .{ .id = 0x0B, .data = res_writer.buffered() }, state.*);
         _ = res_writer.consumeAll();
 

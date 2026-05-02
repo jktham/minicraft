@@ -1,6 +1,7 @@
 const std = @import("std");
 const print = std.debug.print;
 
+const ids = @import("ids.zig");
 const inventory = @import("inventory.zig");
 
 test "testBuf" {
@@ -935,9 +936,9 @@ test "testPosition" {
 }
 
 pub fn readStack(reader: *std.Io.Reader) !inventory.Stack {
-    const id: inventory.Item = @enumFromInt(try readShort(reader));
-    if (id == inventory.Item.Empty) { // -1
-        return .{ .id = inventory.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} }; // empty slot, no more data
+    const id: ids.Item = @enumFromInt(try readShort(reader));
+    if (id == ids.Item.Empty) { // -1
+        return .{ .id = ids.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} }; // empty slot, no more data
     }
     const count = try readByte(reader);
     const damage = try readShort(reader);
@@ -947,7 +948,7 @@ pub fn readStack(reader: *std.Io.Reader) !inventory.Stack {
 
 pub fn writeStack(writer: *std.Io.Writer, stack: inventory.Stack) !void {
     try writeShort(writer, @intFromEnum(stack.id));
-    if (stack.id == inventory.Item.Empty) {
+    if (stack.id == ids.Item.Empty) {
         return; // empty slot, no more data
     }
     try writeByte(writer, stack.count);
@@ -960,10 +961,10 @@ test "testStack" {
     var reader = std.Io.Reader.fixed(&buf);
     var writer = std.Io.Writer.fixed(&buf);
 
-    const values = [_]inventory.Stack{
-        .{ .id = inventory.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} },
-        .{ .id = inventory.Item.Stone, .count = 64, .damage = 0, .nbt = &[_]u8{0} },
-        .{ .id = inventory.Item.Grass, .count = 1, .damage = 5, .nbt = &[_]u8{0x01} }, // TODO: only 1-byte nbt array supported!
+    const values = [_]ids.Stack{
+        .{ .id = ids.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} },
+        .{ .id = ids.Item.Stone, .count = 64, .damage = 0, .nbt = &[_]u8{0} },
+        .{ .id = ids.Item.Grass, .count = 1, .damage = 5, .nbt = &[_]u8{0x01} }, // TODO: only 1-byte nbt array supported!
     };
     for (values) |v| {
         try writeStack(&writer, v);

@@ -10,7 +10,7 @@ pub fn distance(a: entities.fPos, b: entities.fPos) f64 {
 }
 
 pub fn sameBlock(a: entities.fPos, b: entities.fPos) bool {
-    return @trunc(a.x) == @trunc(b.x) and @trunc(a.y) == @trunc(b.y) and @trunc(a.z) == @trunc(b.z);
+    return @floor(a.x) == @floor(b.x) and @floor(a.y) == @floor(b.y) and @floor(a.z) == @floor(b.z);
 }
 
 /// get current time in milliseconds since epoch

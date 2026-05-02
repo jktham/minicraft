@@ -1,30 +1,7 @@
 const std = @import("std");
 
 const data = @import("data.zig");
-
-/// blockid(9) + meta(4)
-pub const palette = [_]u13{
-    0b000000000_0000, // air
-    0b000000001_0000, // stone
-    0b000000010_0000, // grass
-    0b000000011_0000, // dirt
-    0b000000100_0000, // cobblestone
-    0b000000101_0000, // planks
-    0b000000110_0000, // sapling
-    0b000000111_0000, // bedrock
-};
-
-/// index into palette
-pub const Block = enum(u8) {
-    Air = 0,
-    Stone = 1,
-    Grass = 2,
-    Dirt = 3,
-    Cobblestone = 4,
-    Planks = 5,
-    Sapling = 6,
-    Bedrock = 7,
-};
+const ids = @import("ids.zig");
 
 pub const N_CHUNKS = 9; // number of chunks in each direction (x and z)
 pub const N_SUBCHUNKS = 16; // number of subchunks per column (y direction)
@@ -53,13 +30,13 @@ pub const World = struct {
                                 const global_z: i32 = @intCast(chunk_z * N_BLOCKS + local_z);
 
                                 if (global_y == 8) {
-                                    try self.setBlock(global_x, global_y, global_z, Block.Grass);
+                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Grass);
                                 } else if (global_y == 0) {
-                                    try self.setBlock(global_x, global_y, global_z, Block.Bedrock);
+                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Bedrock);
                                 } else if (global_y < 8) {
-                                    try self.setBlock(global_x, global_y, global_z, Block.Stone);
+                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Stone);
                                 } else {
-                                    try self.setBlock(global_x, global_y, global_z, Block.Air);
+                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Air);
                                 }
                             }
                         }
@@ -69,13 +46,12 @@ pub const World = struct {
         }
     }
 
-    pub fn setBlock(self: *World, x: i32, y: i32, z: i32, block: Block) !void {
+    pub fn setBlock(self: *World, x: i32, y: i32, z: i32, block: ids.Block) !void {
         const chunk_x = @divFloor(x, 16);
         const chunk_y = @divFloor(y, 16);
         const chunk_z = @divFloor(z, 16);
 
         if (chunk_x < 0 or chunk_x >= N_CHUNKS or chunk_y < 0 or chunk_y >= N_SUBCHUNKS or chunk_z < 0 or chunk_z >= N_CHUNKS) {
-            std.log.err("Attempted to set block outside of world bounds at ({}, {}, {})", .{ x, y, z });
             return error.OutOfBounds;
         }
 
@@ -86,13 +62,12 @@ pub const World = struct {
         self.chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)][@intCast(local_y)][@intCast(local_z)][@intCast(local_x)] = @intFromEnum(block);
     }
 
-    pub fn getBlock(self: *World, x: i32, y: i32, z: i32) !Block {
+    pub fn getBlock(self: *World, x: i32, y: i32, z: i32) !ids.Block {
         const chunk_x = @divFloor(x, 16);
         const chunk_y = @divFloor(y, 16);
         const chunk_z = @divFloor(z, 16);
 
         if (chunk_x < 0 or chunk_x >= N_CHUNKS or chunk_y < 0 or chunk_y >= N_SUBCHUNKS or chunk_z < 0 or chunk_z >= N_CHUNKS) {
-            std.log.err("Attempted to get block outside of world bounds at ({}, {}, {})", .{ x, y, z });
             return error.OutOfBounds;
         }
 
