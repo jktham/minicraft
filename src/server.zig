@@ -31,7 +31,7 @@ pub fn startServer(io: std.Io, gpa: std.mem.Allocator) !void {
     std.log.info("Listening on {f}", .{server.socket.address});
     while (true) {
         const client = try server.accept(io);
-        handleClient(io, gpa, client, &game) catch |err| {
+        clientConnect(io, gpa, client, &game) catch |err| {
             if (err == error.EndOfStream) {
                 std.log.info("Client disconnected: {f}", .{client.socket.address});
                 continue;
@@ -42,7 +42,7 @@ pub fn startServer(io: std.Io, gpa: std.mem.Allocator) !void {
     }
 }
 
-fn handleClient(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream, game: *_game.Game) !void {
+fn clientConnect(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream, game: *_game.Game) !void {
     std.log.info("Client connected: {f}", .{client.socket.address});
     defer client.close(io);
 
@@ -115,7 +115,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const name = try data.readString(req_reader);
         std.log.info("hello: name {s}", .{name});
 
-        game.player.name = name;
+        game.player.name = try gpa.dupe(u8, name); // reallocate to keep persistent
         game.player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
         // login success response (skip encryption)
         const uuid_str = try data.UUIDtoString(gpa, game.player.uuid);
@@ -448,6 +448,38 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const action_id = try data.readVarInt(req_reader);
         const jump_boost = try data.readVarInt(req_reader);
         std.log.info("entity_action: entity_id 0x{x}, action_id {}, jump_boost {}", .{ entity_id, action_id, jump_boost });
+    } else if (state.* == State.Play and packet.id == 0x02) {
+        // chat message
+        const message = try utils.sanitizeString(gpa, try data.readString(req_reader));
+        defer gpa.free(message);
+        std.log.info("chat_message: {s}", .{message});
+
+        if (message[0] == '/') {
+            // command
+            if (std.mem.eql(u8, message, "/ping")) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"ping: {d}\"}}", .{game.player.ping});
+                defer gpa.free(message_json);
+                try data.writeString(res_writer, message_json);
+                try data.writeByte(res_writer, 1); // position (0 for chat, 1 for system message, 2 for above hotbar)
+                try sendPacket(gpa, tcp_writer, .{ .id = 0x0f, .data = res_writer.buffered() }, state.*);
+                _ = res_writer.consumeAll();
+            } else {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Unknown command: {s}\"}}", .{message});
+                defer gpa.free(message_json);
+                try data.writeString(res_writer, message_json);
+                try data.writeByte(res_writer, 1); // position (0 for chat, 1 for system message, 2 for above hotbar)
+                try sendPacket(gpa, tcp_writer, .{ .id = 0x0f, .data = res_writer.buffered() }, state.*);
+                _ = res_writer.consumeAll();
+            }
+        } else {
+            // chat message clientbound
+            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"{s}: {s}\"}}", .{ game.player.name, message });
+            defer gpa.free(message_json);
+            try data.writeString(res_writer, message_json);
+            try data.writeByte(res_writer, 0); // position (0 for chat, 1 for system message, 2 for above hotbar)
+            try sendPacket(gpa, tcp_writer, .{ .id = 0x0f, .data = res_writer.buffered() }, state.*);
+            _ = res_writer.consumeAll();
+        }
     } else {
         std.log.warn("Unknown packet id 0x{x:0>2} in state {s}", .{ packet.id, @tagName(state.*) });
     }

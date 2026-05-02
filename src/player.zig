@@ -6,7 +6,7 @@ const inventory = @import("inventory.zig");
 pub const Player = struct {
     eid: i32,
     uuid: u128,
-    name: []const u8,
+    name: []u8,
     ping: i32,
     position: entities.fPos,
     look: [2]f32,
