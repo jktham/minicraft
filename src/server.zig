@@ -166,6 +166,13 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
             game.player.inventory.changed[i] = false; // reset changed status after sending initial inventory
         }
 
+        // set experience
+        try data.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(game.player.xp, 10))) / 10.0); // xp bar (0.0-1.0)
+        try data.writeVarInt(res_writer, @divFloor(game.player.xp, 10)); // level
+        try data.writeVarInt(res_writer, game.player.xp); // total xp
+        try sendPacket(gpa, tcp_writer, .{ .id = 0x40, .data = res_writer.buffered() }, state.*);
+        _ = res_writer.consumeAll();
+
         // update player list
         try data.writeVarInt(res_writer, 0); // action: add
         try data.writeVarInt(res_writer, 1); // number of players
@@ -289,11 +296,17 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const face = try data.readByte(req_reader);
         std.log.info("player_digging: status {}, position ({}, {}, {}), face {}", .{ status, pos.x, pos.y, pos.z, face });
 
-        if (game.player.gamemode == 1 and status == 0 or game.player.gamemode == 0 and status == 2) {
+        if (game.player.gamemode == 1 and status == 0 or game.player.gamemode == 0 and status == 2) { // TODO: saplings are broken without sending end digging
             // finish digging, set block to air
             const block = try game.world.getBlock(@intCast(pos.x), @intCast(pos.y), @intCast(pos.z));
             std.log.info("Breaking block {} at ({}, {}, {})", .{ block, pos.x, pos.y, pos.z });
             try game.world.setBlock(@intCast(pos.x), @intCast(pos.y), @intCast(pos.z), world.Block.Air);
+
+            // block change response
+            try data.writePosition(res_writer, pos); // position
+            try data.writeVarInt(res_writer, world.palette[@intFromEnum(world.Block.Air)]); // block id
+            try sendPacket(gpa, tcp_writer, .{ .id = 0x0B, .data = res_writer.buffered() }, state.*);
+            _ = res_writer.consumeAll();
 
             // // spawn xp orb
             // try io.writeVarInt(res_writer, entities.randomEID()); // entity id
@@ -397,6 +410,12 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         };
         std.log.info("Placing block {} at ({}, {}, {})", .{ block, place_pos.x, place_pos.y, place_pos.z });
         try game.world.setBlock(place_pos.x, place_pos.y, place_pos.z, block);
+
+        // block change response
+        try data.writePosition(res_writer, place_pos); // position
+        try data.writeVarInt(res_writer, world.palette[@intFromEnum(block)]); // block id
+        try sendPacket(gpa, tcp_writer, .{ .id = 0x0B, .data = res_writer.buffered() }, state.*);
+        _ = res_writer.consumeAll();
 
         // set inventory
         try data.writeByte(res_writer, 0); // window id (0 for player inventory)
