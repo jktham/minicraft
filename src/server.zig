@@ -59,14 +59,13 @@ fn handleClient(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream, g
     var lastKeepAlive: i64 = utils.getTime(io);
 
     while (true) {
-        const packet = try receivePacket(gpa, tcp_reader, state);
+        const packet = try receivePacket(gpa, tcp_reader, state); // TODO: fix blocking behavior when no more tcp packets to read from socket
         try updateNetwork(io, gpa, tcp_writer, game, &state, packet);
         try updateFixed(io, gpa, tcp_writer, game, &state, &lastUpdate, &lastKeepAlive);
     }
 }
 
-/// on receiving a packet, update server state and send responses as needed \
-/// TODO: fix blocking behavior when no more tcp packets to read from socket
+/// on receiving a packet, update server state and send responses as needed
 fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, game: *_game.Game, state: *State, packet: data.Packet) !void {
     var r = std.Io.Reader.fixed(packet.data);
     const req_reader = &r;
@@ -151,19 +150,20 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         try sendPacket(gpa, tcp_writer, .{ .id = 0x23, .data = res_writer.buffered() }, state.*);
         _ = res_writer.consumeAll();
 
-        try game.player.inventory.setSlot(36, inventory.Stack{
+        game.player.inventory.slots[36] = inventory.Stack{
             .id = inventory.Item.IronPickaxe,
             .count = 99,
             .damage = 0,
             .nbt = &[_]u8{0},
-        });
-        // set inventory
+        };
+        // set full inventory
         for (0..inventory.N_SLOTS) |i| {
             try data.writeByte(res_writer, 0); // window id (0 for player inventory)
             try data.writeShort(res_writer, @intCast(i)); // slot id
             try data.writeStack(res_writer, game.player.inventory.slots[i]); // slot data
             try sendPacket(gpa, tcp_writer, .{ .id = 0x16, .data = res_writer.buffered() }, state.*);
             _ = res_writer.consumeAll();
+            game.player.inventory.changed[i] = false; // reset changed status after sending initial inventory
         }
 
         // update player list
@@ -404,6 +404,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         try data.writeStack(res_writer, game.player.inventory.slots[slot]); // slot data
         try sendPacket(gpa, tcp_writer, .{ .id = 0x16, .data = res_writer.buffered() }, state.*);
         _ = res_writer.consumeAll();
+        game.player.inventory.changed[slot] = false;
     } else if (state.* == State.Play and packet.id == 0x1d) {
         // player animation
         const hand = try data.readVarInt(req_reader);
@@ -471,13 +472,16 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, g
             try sendPacket(gpa, tcp_writer, .{ .id = 0x4b, .data = res_writer.buffered() }, state.*);
             _ = res_writer.consumeAll();
 
-            // set inventory, TODO: only send changed slots
+            // set inventory
             for (0..inventory.N_SLOTS) |i| {
-                try data.writeByte(res_writer, 0); // window id (0 for player inventory)
-                try data.writeShort(res_writer, @intCast(i)); // slot id
-                try data.writeStack(res_writer, game.player.inventory.slots[i]); // slot data
-                try sendPacket(gpa, tcp_writer, .{ .id = 0x16, .data = res_writer.buffered() }, state.*);
-                _ = res_writer.consumeAll();
+                if (game.player.inventory.changed[i]) {
+                    try data.writeByte(res_writer, 0); // window id (0 for player inventory)
+                    try data.writeShort(res_writer, @intCast(i)); // slot id
+                    try data.writeStack(res_writer, game.player.inventory.slots[i]); // slot data
+                    try sendPacket(gpa, tcp_writer, .{ .id = 0x16, .data = res_writer.buffered() }, state.*);
+                    _ = res_writer.consumeAll();
+                    game.player.inventory.changed[i] = false;
+                }
             }
 
             // destroy item entity

@@ -52,21 +52,19 @@ pub const MAX_STACK = 64;
 
 pub const Inventory = struct {
     slots: [N_SLOTS]Stack,
+    changed: [N_SLOTS]bool, // slot has changed since last update
 
     pub fn init() Inventory {
         return .{
             .slots = [_]Stack{.{ .id = .Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} }} ** N_SLOTS,
+            .changed = [_]bool{false} ** N_SLOTS,
         };
     }
 
-    pub fn setSlot(self: *Inventory, index: usize, stack: Stack) !void {
-        if (index >= N_SLOTS) return error.InvalidSlot;
-        self.slots[index] = stack;
-    }
-
+    /// try to add the stack to the inventory, error if not enough space in the inventory. if there are already stacks of the same item, they will be filled up first.
     pub fn addStack(self: *Inventory, stack: Stack) !void {
         var count = stack.count;
-        for (&self.slots) |*slot| {
+        for (&self.slots, 0..N_SLOTS) |*slot, i| {
             if (slot.id == stack.id and slot.damage == stack.damage and std.mem.eql(u8, slot.nbt, stack.nbt)) {
                 const new_count = slot.count + count;
                 if (new_count > MAX_STACK) {
@@ -75,24 +73,28 @@ pub const Inventory = struct {
                     continue;
                 }
                 slot.count = new_count;
+                self.changed[i] = true;
                 return;
             }
         }
         for (36..45) |i| { // hotbar first
             if (self.slots[i].id == .Empty) {
                 self.slots[i] = stack;
+                self.changed[i] = true;
                 return;
             }
         }
-        for (&self.slots) |*slot| {
+        for (&self.slots, 0..N_SLOTS) |*slot, i| {
             if (slot.id == .Empty) {
                 slot.* = stack;
+                self.changed[i] = true;
                 return;
             }
         }
         return error.InventoryFull;
     }
 
+    /// try to remove count items from the stack in the given slot, error if not enough items in the stack. if the stack is empty after removing, set the slot to empty.
     pub fn removeCount(self: *Inventory, index: usize, count: u8) !void {
         var slot = &self.slots[index];
         if (count > slot.count) return error.NotEnoughItems;
@@ -105,5 +107,6 @@ pub const Inventory = struct {
             slot.damage = 0;
             slot.nbt = &[_]u8{0};
         }
+        self.changed[index] = true;
     }
 };
