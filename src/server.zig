@@ -58,16 +58,17 @@ fn clientConnect(io: std.Io, gpa: std.mem.Allocator, client: std.Io.net.Stream, 
     var state: State = State.Handshaking;
     var lastUpdate: i64 = utils.getTime(io);
     var lastKeepAlive: i64 = utils.getTime(io);
+    const player_index = 0; // TODO: only supporting 1 player for now, player not registered at this point
 
     while (true) {
         const packet = try receivePacket(gpa, tcp_reader, state); // TODO: fix blocking behavior when no more tcp packets to read from socket
-        try updateNetwork(io, gpa, tcp_writer, game, &state, packet);
+        try updateNetwork(io, gpa, tcp_writer, game, &state, packet, player_index);
         try updateFixed(io, gpa, tcp_writer, game, &state, &lastUpdate, &lastKeepAlive);
     }
 }
 
 /// on receiving a packet, update server state and send responses as needed
-fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, game: *_game.Game, state: *State, packet: data.Packet) !void {
+fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, game: *_game.Game, state: *State, packet: data.Packet, p: usize) !void {
     var r = std.Io.Reader.fixed(packet.data);
     const req_reader = &r;
 
@@ -118,10 +119,10 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         try game.addPlayer(gpa, name);
 
         // login success response (skip encryption)
-        const uuid_str = try data.UUIDtoString(gpa, game.player.uuid);
+        const uuid_str = try data.UUIDtoString(gpa, game.players.items[p].uuid);
         defer gpa.free(uuid_str);
         try data.writeString(res_writer, uuid_str); // uuid as string
-        try data.writeString(res_writer, game.player.name); // username
+        try data.writeString(res_writer, game.players.items[p].name); // username
         try sendPacket(gpa, tcp_writer, .{ .id = 0x02, .data = res_writer.buffered() }, state.*);
         _ = res_writer.consumeAll();
 
@@ -138,8 +139,8 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         _ = res_writer.consumeAll();
 
         // join game
-        try data.writeInt(res_writer, game.player.eid); // entity id
-        try data.writeByte(res_writer, game.player.gamemode); // gamemode
+        try data.writeInt(res_writer, game.players.items[p].eid); // entity id
+        try data.writeByte(res_writer, game.players.items[p].gamemode); // gamemode
         try data.writeInt(res_writer, 0); // dimension
         try data.writeByte(res_writer, 2); // difficulty
         try data.writeByte(res_writer, 0); // max players
@@ -149,29 +150,31 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         _ = res_writer.consumeAll();
 
         // update client
-        game.player.inventory.changed = [_]bool{true} ** inventory.N_SLOTS; // mark all slots as changed to send full inventory on login
-        try game.sendInventory(gpa, tcp_writer, state);
-        try game.sendXP(gpa, tcp_writer, state);
+        game.players.items[p].inventory.changed = [_]bool{true} ** inventory.N_SLOTS; // mark all slots as changed to send full inventory on login
+        try game.sendInventory(gpa, tcp_writer, state, &game.players.items[p]);
+        try game.sendXP(gpa, tcp_writer, state, &game.players.items[p]);
         try game.sendItemEntities(gpa, tcp_writer, state);
 
         // update player list
-        try data.writeVarInt(res_writer, 0); // action: add
-        try data.writeVarInt(res_writer, 1); // number of players
-        try data.writeUUID(res_writer, game.player.uuid); // player uuid
-        try data.writeString(res_writer, game.player.name); // player name
-        try data.writeVarInt(res_writer, 0); // properties
-        try data.writeVarInt(res_writer, game.player.gamemode); // gamemode
-        try data.writeVarInt(res_writer, game.player.ping); // ping
-        try data.writeBool(res_writer, false); // has display name
-        try sendPacket(gpa, tcp_writer, .{ .id = 0x2e, .data = res_writer.buffered() }, state.*);
-        _ = res_writer.consumeAll();
+        for (game.players.items) |player| {
+            try data.writeVarInt(res_writer, 0); // action: add
+            try data.writeVarInt(res_writer, 1); // number of players
+            try data.writeUUID(res_writer, player.uuid); // player uuid
+            try data.writeString(res_writer, player.name); // player name
+            try data.writeVarInt(res_writer, 0); // properties
+            try data.writeVarInt(res_writer, player.gamemode); // gamemode
+            try data.writeVarInt(res_writer, player.ping); // ping
+            try data.writeBool(res_writer, false); // has display name
+            try sendPacket(gpa, tcp_writer, .{ .id = 0x2e, .data = res_writer.buffered() }, state.*);
+            _ = res_writer.consumeAll();
+        }
 
         // update client position (ends loading screen)
-        try data.writeDouble(res_writer, game.player.position.x); // x
-        try data.writeDouble(res_writer, game.player.position.y); // y
-        try data.writeDouble(res_writer, game.player.position.z); // z
-        try data.writeFloat(res_writer, game.player.look[0]); // yaw
-        try data.writeFloat(res_writer, game.player.look[1]); // pitch
+        try data.writeDouble(res_writer, game.players.items[p].position.x); // x
+        try data.writeDouble(res_writer, game.players.items[p].position.y); // y
+        try data.writeDouble(res_writer, game.players.items[p].position.z); // z
+        try data.writeFloat(res_writer, game.players.items[p].look[0]); // yaw
+        try data.writeFloat(res_writer, game.players.items[p].look[1]); // pitch
         try data.writeByte(res_writer, 0b00000000); // flags (relative)
         try data.writeVarInt(res_writer, @truncate(time & 0x7FFFFFFF)); // teleport id
         try sendPacket(gpa, tcp_writer, .{ .id = 0x2f, .data = res_writer.buffered() }, state.*);
@@ -206,7 +209,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const on_ground = try data.readBool(req_reader);
         std.log.info("Got position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
-        game.player.position = entities.fPos{ .x = x, .y = y, .z = z };
+        game.players.items[p].position = entities.fPos{ .x = x, .y = y, .z = z };
     } else if (state.* == State.Play and packet.id == 0x0e) {
         // position and look update
         const x = try data.readDouble(req_reader);
@@ -217,8 +220,8 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const on_ground = try data.readBool(req_reader);
         std.log.info("Got position_look_update: position ({}, {}, {}), yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
-        game.player.position = entities.fPos{ .x = x, .y = y, .z = z };
-        game.player.look = [2]f32{ yaw, pitch };
+        game.players.items[p].position = entities.fPos{ .x = x, .y = y, .z = z };
+        game.players.items[p].look = [2]f32{ yaw, pitch };
     } else if (state.* == State.Play and packet.id == 0x0f) {
         // look update
         const yaw = try data.readFloat(req_reader);
@@ -226,7 +229,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const on_ground = try data.readBool(req_reader);
         std.log.info("Got look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
 
-        game.player.look = [2]f32{ yaw, pitch };
+        game.players.items[p].look = [2]f32{ yaw, pitch };
     } else if (state.* == State.Play and packet.id == 0x00) {
         // teleport confirm
         const teleport_id = try data.readVarInt(req_reader);
@@ -235,7 +238,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         // keep alive
         const timestamp = try data.readLong(req_reader);
         std.log.info("Got keep_alive: timestamp {}", .{timestamp});
-        game.player.ping = @truncate((time - timestamp) * 2);
+        game.players.items[p].ping = @truncate((time - timestamp) * 2);
     } else if (state.* == State.Play and packet.id == 0x14) {
         // player digging
         const status = try data.readVarInt(req_reader);
@@ -243,17 +246,15 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const face = try data.readByte(req_reader);
         std.log.info("Got player_digging: status {}, position ({}, {}, {}), face {}", .{ status, pos.x, pos.y, pos.z, face });
 
-        if (game.player.gamemode == 1 and status == 0 or game.player.gamemode == 0 and status == 2) { // TODO: saplings are broken without sending end digging
+        if (game.players.items[p].gamemode == 1 and status == 0 or game.players.items[p].gamemode == 0 and status == 2) { // TODO: saplings are broken without sending end digging
             // finished digging, break block
-            try game.breakBlock(gpa, tcp_writer, state, pos);
+            try game.breakBlock(gpa, tcp_writer, state, &game.players.items[p], pos);
         } else if (status == 4) {
             // drop single item
-            const slot = 36 + game.player.selected_slot;
-            try game.dropItem(gpa, tcp_writer, state, slot, false);
+            try game.dropItem(gpa, tcp_writer, state, &game.players.items[p], false);
         } else if (status == 3) {
             // drop entire stack
-            const slot = 36 + game.player.selected_slot;
-            try game.dropItem(gpa, tcp_writer, state, slot, true);
+            try game.dropItem(gpa, tcp_writer, state, &game.players.items[p], true);
         }
     } else if (state.* == State.Play and packet.id == 0x1f) {
         // player block placement
@@ -266,8 +267,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         std.log.info("Got player_block_placement: position ({}, {}, {}), face {}, hand {}, cursor ({}, {}, {})", .{ pos.x, pos.y, pos.z, face, hand, cursor_x, cursor_y, cursor_z });
 
         const place_pos = world.applyFaceOffset(pos.x, pos.y, pos.z, face);
-        const slot = 36 + game.player.selected_slot; // TODO: offhand
-        try game.placeBlock(gpa, tcp_writer, state, place_pos, slot);
+        try game.placeBlock(gpa, tcp_writer, state, &game.players.items[p], place_pos);
     } else if (state.* == State.Play and packet.id == 0x1d) {
         // player animation
         const hand = try data.readVarInt(req_reader);
@@ -285,7 +285,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         // player slot selection
         const slot = try data.readShort(req_reader);
         std.log.info("Got player_slot_selection: slot {}", .{slot});
-        game.player.selected_slot = @intCast(slot);
+        game.players.items[p].selected_slot = @intCast(slot);
     } else if (state.* == State.Play and packet.id == 0x15) {
         // entity action
         const entity_id = try data.readVarInt(req_reader);
@@ -299,9 +299,9 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         std.log.info("Got chat_message: {s}", .{message});
 
         if (message[0] == '/') {
-            try game.processCommand(gpa, tcp_writer, state, message);
+            try game.processCommand(gpa, tcp_writer, state, &game.players.items[p], message);
         } else {
-            try game.processChat(gpa, tcp_writer, state, message, game.player.name);
+            try game.processChat(gpa, tcp_writer, state, &game.players.items[p], message);
         }
     } else {
         std.log.warn("Unknown packet id 0x{x:0>2} in state {s}", .{ packet.id, @tagName(state.*) });

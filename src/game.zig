@@ -1,57 +1,69 @@
 const std = @import("std");
 
+const _player = @import("player.zig");
 const data = @import("data.zig");
 const entities = @import("entities.zig");
 const ids = @import("ids.zig");
 const inventory = @import("inventory.zig");
-const player = @import("player.zig");
 const server = @import("server.zig");
 const utils = @import("utils.zig");
 const world = @import("world.zig");
 
 pub const Game = struct {
-    player: player.Player,
+    players: std.ArrayList(_player.Player),
     world: world.World,
     entities: entities.Entities,
     time: i64, // world time in ticks (20 ticks per second)
 
     pub fn init() Game {
         return .{
-            .player = player.Player.init(),
+            .players = std.ArrayList(_player.Player).empty,
             .world = world.World.init(),
             .entities = entities.Entities.init(),
             .time = 0,
         };
     }
 
-    /// populate player fields, TODO: support multiple players
+    /// populate player fields, check if rejoining by comparing name
     pub fn addPlayer(self: *Game, gpa: std.mem.Allocator, name: []const u8) !void {
-        std.log.info("Player {s} joined the game", .{name});
-        self.player.name = try gpa.dupe(u8, name); // reallocate to keep persistent
-        self.player.eid = 0xbeef; // dummy entity id
-        self.player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
-        self.player.gamemode = 0; // 0=survival, 1=creative
-        self.player.selected_slot = 0;
+        var existing_player: ?*_player.Player = null;
+        for (self.players.items) |*p| {
+            if (std.mem.eql(u8, p.name, name)) {
+                existing_player = p;
+                break;
+            }
+        }
 
-        if (self.player.first_join) {
-            self.player.inventory.slots[36] = inventory.Stack{
+        if (existing_player == null) {
+            std.log.info("Player {s} joined the game for the first time", .{name});
+
+            var player = _player.Player.init();
+            player.name = try gpa.dupe(u8, name); // reallocate to keep persistent
+            player.eid = entities.randomEID();
+            player.uuid = entities.randomUUID();
+            player.gamemode = 1; // 0=survival, 1=creative
+
+            player.inventory.slots[36] = inventory.Stack{
                 .id = ids.Item.IronPickaxe,
                 .count = 99,
                 .damage = 0,
                 .nbt = &[_]u8{0},
             };
-            self.player.inventory.changed[36] = true;
+            player.inventory.changed[36] = true;
 
             const center = @as(f32, world.N_CHUNKS * world.N_BLOCKS) / 2.0;
-            self.player.position = entities.fPos{ .x = center, .y = 20, .z = center };
-            self.player.look = [2]f32{ 0, 0 };
+            player.position = entities.fPos{ .x = center, .y = 20, .z = center };
+            player.look = [2]f32{ 0, 0 };
 
-            self.player.first_join = false; // only set initial inventory and position on first join
+            try self.players.append(gpa, player);
+        } else {
+            std.log.info("Player {s} rejoined the game", .{name});
+            existing_player.?.selected_slot = 0;
         }
     }
 
     /// validate and break block, then update client
-    pub fn breakBlock(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, position: data.Position) !void {
+    pub fn breakBlock(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, position: data.Position) !void {
         const block = try self.world.getBlock(@intCast(position.x), @intCast(position.y), @intCast(position.z));
         if (block == ids.Block.Air) {
             std.log.warn("Cannot break block at ({}, {}, {}) because it is already air", .{ position.x, position.y, position.z });
@@ -60,7 +72,7 @@ pub const Game = struct {
         }
 
         try self.world.setBlock(@intCast(position.x), @intCast(position.y), @intCast(position.z), ids.Block.Air);
-        self.player.xp += 1;
+        player.xp += 1;
 
         // create item entity
         const item: entities.ItemEntity = .{
@@ -82,13 +94,14 @@ pub const Game = struct {
 
         // update client
         try self.sendBlockChange(gpa, tcp_writer, state, position);
-        try self.sendXP(gpa, tcp_writer, state);
+        try self.sendXP(gpa, tcp_writer, state, player);
         try self.sendItemEntities(gpa, tcp_writer, state);
     }
 
     /// validate and place block, then update client
-    pub fn placeBlock(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, position: data.Position, slot: u8) !void {
-        const stack = self.player.inventory.slots[slot];
+    pub fn placeBlock(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, position: data.Position) !void {
+        const slot = 36 + player.selected_slot; // TODO: offhand
+        const stack = player.inventory.slots[slot];
         const block = stack.id.toBlock();
         var valid = true;
 
@@ -97,7 +110,7 @@ pub const Game = struct {
             std.log.warn("Cannot place item {}", .{stack.id});
             valid = false;
         }
-        if (valid and self.player.inventory.slots[slot].count == 0) {
+        if (valid and player.inventory.slots[slot].count == 0) {
             std.log.warn("Cannot place block at ({}, {}, {}) because slot {} is empty", .{ position.x, position.y, position.z, slot });
             valid = false;
         }
@@ -119,47 +132,50 @@ pub const Game = struct {
             .y = @as(f64, @floatFromInt(position.y)) + 0.5,
             .z = @as(f64, @floatFromInt(position.z)) + 0.5,
         };
-        if (valid and utils.distance(self.player.position, position_center) > 6.0) {
+        if (valid and utils.distance(player.position, position_center) > 6.0) {
             std.log.warn("Cannot place block at ({}, {}, {}) because it is too far away", .{ position.x, position.y, position.z });
             valid = false;
         }
-        if (valid and utils.sameBlock(self.player.position, position_center) or utils.sameBlock(.{ .x = self.player.position.x, .y = self.player.position.y + 1, .z = self.player.position.z }, position_center)) {
+        if (valid and utils.sameBlock(player.position, position_center) or utils.sameBlock(.{ .x = player.position.x, .y = player.position.y + 1, .z = player.position.z }, position_center)) {
             std.log.warn("Cannot place block at ({}, {}, {}) because it is blocked by player", .{ position.x, position.y, position.z });
             valid = false;
         }
 
         if (!valid) { // update client to prevent desync, since it may make different choices about validity
-            self.player.inventory.changed[slot] = true; // force inventory update to client
+            player.inventory.changed[slot] = true; // force inventory update to client
             try self.sendBlockChange(gpa, tcp_writer, state, position);
-            try self.sendInventory(gpa, tcp_writer, state);
+            try self.sendInventory(gpa, tcp_writer, state, player);
             return;
         }
 
         std.log.info("Placing block {} at ({}, {}, {})", .{ block, position.x, position.y, position.z });
-        try self.player.inventory.removeCount(slot, 1);
+        try player.inventory.removeCount(slot, 1);
         try self.world.setBlock(position.x, position.y, position.z, block);
 
         // update client
         try self.sendBlockChange(gpa, tcp_writer, state, position);
-        try self.sendInventory(gpa, tcp_writer, state);
+        try self.sendInventory(gpa, tcp_writer, state, player);
     }
 
-    pub fn dropItem(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, slot: u8, drop_stack: bool) !void {
-        const stack = self.player.inventory.slots[slot];
+    pub fn dropItem(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, drop_stack: bool) !void {
+        const slot = 36 + player.selected_slot;
+        const stack = player.inventory.slots[slot];
         if (stack.count == 0) {
             std.log.warn("Cannot drop item from slot {} because it is empty", .{slot});
+            player.inventory.changed[slot] = true;
+            try self.sendInventory(gpa, tcp_writer, state, player);
             return;
         }
-        try self.player.inventory.removeCount(slot, if (drop_stack) stack.count else 1);
+        try player.inventory.removeCount(slot, if (drop_stack) stack.count else 1);
 
         // create item entity
         const item: entities.ItemEntity = .{
             .eid = entities.randomEID(),
             .uuid = entities.randomUUID(),
             .position = entities.fPos{
-                .x = self.player.position.x - std.math.sin(self.player.look[0] / 180.0 * std.math.pi) * 2,
-                .y = self.player.position.y + 0.5,
-                .z = self.player.position.z + std.math.cos(self.player.look[0] / 180.0 * std.math.pi) * 2,
+                .x = player.position.x - std.math.sin(player.look[0] / 180.0 * std.math.pi) * 2,
+                .y = player.position.y + 0.5,
+                .z = player.position.z + std.math.cos(player.look[0] / 180.0 * std.math.pi) * 2,
             },
             .stack = .{
                 .id = stack.id,
@@ -171,19 +187,19 @@ pub const Game = struct {
         try self.entities.spawnItem(gpa, item);
 
         // update client
-        try self.sendInventory(gpa, tcp_writer, state);
+        try self.sendInventory(gpa, tcp_writer, state, player);
         try self.sendItemEntities(gpa, tcp_writer, state);
     }
 
-    pub fn processChat(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, message: []const u8, player_name: []const u8) !void {
-        const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"{s}: {s}\"}}", .{ player_name, message });
+    pub fn processChat(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, message: []const u8) !void {
+        const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"{s}: {s}\"}}", .{ player.name, message });
         defer gpa.free(message_json);
         try self.sendMessage(gpa, tcp_writer, state, message_json, 0);
     }
 
-    pub fn processCommand(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, message: []const u8) !void {
+    pub fn processCommand(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, message: []const u8) !void {
         if (std.mem.eql(u8, message, "/ping")) {
-            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"ping: {d} ms\"}}", .{self.player.ping});
+            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"ping: {d} ms\"}}", .{player.ping});
             defer gpa.free(message_json);
             try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
         } else {
@@ -212,50 +228,53 @@ pub const Game = struct {
         }
 
         // pick up nearby items
-        const close_items = try self.entities.getCloseItems(gpa, .{ .x = self.player.position.x, .y = self.player.position.y + 1.0, .z = self.player.position.z }, 1.2);
-        for (close_items) |item| {
-            self.player.inventory.addStack(item.stack) catch |err| {
-                if (err == error.InventoryFull) {
-                    std.log.warn("Inventory full, cannot pick up item with eid 0x{x}", .{item.eid});
-                    continue;
-                }
-            };
+        for (self.players.items) |*player| {
+            const close_items = try self.entities.getCloseItems(gpa, .{ .x = player.position.x, .y = player.position.y + 1.0, .z = player.position.z }, 1.2);
+            for (close_items) |item| {
+                player.inventory.addStack(item.stack) catch |err| {
+                    if (err == error.InventoryFull) {
+                        std.log.warn("Inventory full, cannot pick up item with eid 0x{x}", .{item.eid});
+                        continue;
+                    }
+                };
 
-            // collect item
-            try data.writeVarInt(res_writer, item.eid); // collected
-            try data.writeVarInt(res_writer, self.player.eid); // collector
-            try data.writeVarInt(res_writer, item.stack.count); // count
-            try server.sendPacket(gpa, tcp_writer, .{ .id = 0x4b, .data = res_writer.buffered() }, state.*);
-            _ = res_writer.consumeAll();
+                // collect item
+                try data.writeVarInt(res_writer, item.eid); // collected
+                try data.writeVarInt(res_writer, player.eid); // collector
+                try data.writeVarInt(res_writer, item.stack.count); // count
+                try server.sendPacket(gpa, tcp_writer, .{ .id = 0x4b, .data = res_writer.buffered() }, state.*);
+                _ = res_writer.consumeAll();
 
-            // set inventory
-            try self.sendInventory(gpa, tcp_writer, state);
+                // set inventory
+                try self.sendInventory(gpa, tcp_writer, state, player);
 
-            // destroy item entity
-            try self.entities.destroyItem(item.eid);
+                // destroy item entity
+                try self.entities.destroyItem(item.eid);
 
-            try data.writeVarInt(res_writer, 1); // count
-            try data.writeVarInt(res_writer, item.eid); // entity id
-            try server.sendPacket(gpa, tcp_writer, .{ .id = 0x32, .data = res_writer.buffered() }, state.*);
-            _ = res_writer.consumeAll();
+                try data.writeVarInt(res_writer, 1); // count
+                try data.writeVarInt(res_writer, item.eid); // entity id
+                try server.sendPacket(gpa, tcp_writer, .{ .id = 0x32, .data = res_writer.buffered() }, state.*);
+                _ = res_writer.consumeAll();
+            }
         }
     }
 
     /// send current inventory state to client, only changed slots for efficiency
-    pub fn sendInventory(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State) !void {
+    pub fn sendInventory(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player) !void {
+        _ = self; // autofix
         var res_data: [1000]u8 = undefined;
         var w = std.Io.Writer.fixed(&res_data);
         const res_writer = &w;
 
         std.log.info("Sending inventory", .{});
-        for (self.player.inventory.slots, 0..) |slot, i| {
-            if (self.player.inventory.changed[i]) {
+        for (player.inventory.slots, 0..) |slot, i| {
+            if (player.inventory.changed[i]) {
                 try data.writeByte(res_writer, 0); // window id (0 for player inventory)
                 try data.writeShort(res_writer, @intCast(i)); // slot id
                 try data.writeStack(res_writer, slot); // slot data
                 try server.sendPacket(gpa, tcp_writer, .{ .id = 0x16, .data = res_writer.buffered() }, state.*);
                 _ = res_writer.consumeAll();
-                self.player.inventory.changed[i] = false;
+                player.inventory.changed[i] = false;
             }
         }
     }
@@ -275,16 +294,17 @@ pub const Game = struct {
     }
 
     /// send current xp state to client
-    pub fn sendXP(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State) !void {
+    pub fn sendXP(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player) !void {
+        _ = self; // autofix
         var res_data: [1000]u8 = undefined;
         var w = std.Io.Writer.fixed(&res_data);
         const res_writer = &w;
 
         std.log.info("Sending xp", .{});
         // set experience, http://minecraft.gamepedia.com/Experience%23Leveling_up
-        try data.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(self.player.xp, 10))) / 10.0); // xp bar (0.0-1.0)
-        try data.writeVarInt(res_writer, @divFloor(self.player.xp, 10)); // level
-        try data.writeVarInt(res_writer, self.player.xp); // total xp
+        try data.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(player.xp, 10))) / 10.0); // xp bar (0.0-1.0)
+        try data.writeVarInt(res_writer, @divFloor(player.xp, 10)); // level
+        try data.writeVarInt(res_writer, player.xp); // total xp
         try server.sendPacket(gpa, tcp_writer, .{ .id = 0x40, .data = res_writer.buffered() }, state.*);
         _ = res_writer.consumeAll();
     }
