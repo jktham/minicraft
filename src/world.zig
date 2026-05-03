@@ -47,13 +47,13 @@ pub const World = struct {
     }
 
     pub fn setBlock(self: *World, x: i32, y: i32, z: i32, block: ids.Block) !void {
+        if (!checkBounds(x, y, z)) {
+            return error.OutOfBounds;
+        }
+
         const chunk_x = @divFloor(x, 16);
         const chunk_y = @divFloor(y, 16);
         const chunk_z = @divFloor(z, 16);
-
-        if (chunk_x < 0 or chunk_x >= N_CHUNKS or chunk_y < 0 or chunk_y >= N_SUBCHUNKS or chunk_z < 0 or chunk_z >= N_CHUNKS) {
-            return error.OutOfBounds;
-        }
 
         const local_x = @mod(7 - x, 16); // alignment with chunk data
         const local_y = @mod(y, 16);
@@ -63,13 +63,13 @@ pub const World = struct {
     }
 
     pub fn getBlock(self: *World, x: i32, y: i32, z: i32) !ids.Block {
+        if (!checkBounds(x, y, z)) {
+            return error.OutOfBounds;
+        }
+
         const chunk_x = @divFloor(x, 16);
         const chunk_y = @divFloor(y, 16);
         const chunk_z = @divFloor(z, 16);
-
-        if (chunk_x < 0 or chunk_x >= N_CHUNKS or chunk_y < 0 or chunk_y >= N_SUBCHUNKS or chunk_z < 0 or chunk_z >= N_CHUNKS) {
-            return error.OutOfBounds;
-        }
 
         const local_x = @mod(7 - x, 16); // alignment with chunk data
         const local_y = @mod(y, 16);
@@ -87,6 +87,13 @@ pub const World = struct {
         return @ptrCast(&self.chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)]);
     }
 };
+
+pub fn checkBounds(x: i32, y: i32, z: i32) bool {
+    const chunk_x = @divFloor(x, 16);
+    const chunk_y = @divFloor(y, 16);
+    const chunk_z = @divFloor(z, 16);
+    return chunk_x >= 0 and chunk_x < N_CHUNKS and chunk_y >= 0 and chunk_y < N_SUBCHUNKS and chunk_z >= 0 and chunk_z < N_CHUNKS;
+}
 
 const EPS = 0.000001;
 pub fn applyFaceOffset(x: i32, y: i32, z: i32, face: i32) data.Position {

@@ -14,6 +14,7 @@ pub const Player = struct {
     xp: i32,
     inventory: inventory.Inventory,
     selected_slot: u8, // currently selected hotbar slot (0-8)
+    first_join: bool, // player has joined for the first time
 
     pub fn init() Player {
         return .{
@@ -27,6 +28,7 @@ pub const Player = struct {
             .xp = 0,
             .inventory = inventory.Inventory.init(),
             .selected_slot = 0,
+            .first_join = true,
         };
     }
 };
