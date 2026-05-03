@@ -83,7 +83,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const server_address = try data.readString(req_reader);
         const server_port = try data.readShort(req_reader);
         const intent = try data.readVarInt(req_reader);
-        std.log.info("handshake: protocol_version {d}, server_address {s}, server_port {d}, intent {d}", .{ protocol_version, server_address, server_port, intent });
+        std.log.info("Got handshake: protocol_version {d}, server_address {s}, server_port {d}, intent {d}", .{ protocol_version, server_address, server_port, intent });
 
         if (intent == 1) {
             setState(state, State.Status);
@@ -92,7 +92,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         }
     } else if (state.* == State.Status and packet.id == 0x00) {
         // status request
-        std.log.info("status_request", .{});
+        std.log.info("Got status_request", .{});
 
         // status response
         const status = try std.Io.Dir.readFileAlloc(std.Io.Dir.cwd(), io, "res/status.json", gpa, std.Io.Limit.unlimited);
@@ -103,7 +103,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
     } else if (state.* == State.Status and packet.id == 0x01) {
         // ping request
         const timestamp = try data.readLong(req_reader);
-        std.log.info("ping_request: timestamp {d}", .{timestamp});
+        std.log.info("Got ping_request: timestamp {d}", .{timestamp});
 
         // ping response
         try data.writeLong(res_writer, timestamp);
@@ -112,7 +112,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
     } else if (state.* == State.Login and packet.id == 0x00) {
         // hello request
         const name = try data.readString(req_reader);
-        std.log.info("hello: name {s}", .{name});
+        std.log.info("Got hello: name {s}", .{name});
 
         // register player
         try game.addPlayer(gpa, name);
@@ -187,24 +187,24 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const chat_colors = try data.readBool(req_reader);
         const skin_parts = try data.readByte(req_reader);
         const main_hand = try data.readVarInt(req_reader);
-        std.log.info("client_settings: locale {s}, view_distance {d}, chat_mode {d}, chat_colors {}, skin_parts {d}, main_hand {d}", .{ locale, view_distance, chat_mode, chat_colors, skin_parts, main_hand });
+        std.log.info("Got client_settings: locale {s}, view_distance {d}, chat_mode {d}, chat_colors {}, skin_parts {d}, main_hand {d}", .{ locale, view_distance, chat_mode, chat_colors, skin_parts, main_hand });
     } else if (state.* == State.Play and packet.id == 0x09) {
         // plugin message
         const channel = try data.readString(req_reader);
         const payload = try req_reader.allocRemaining(gpa, std.Io.Limit.unlimited); // unknown size
         defer gpa.free(payload);
-        std.log.info("plugin_message: channel {s}, payload 0x{x} ({s})", .{ channel, payload, try utils.sanitizeString(gpa, payload) });
+        std.log.info("Got plugin_message: channel {s}, payload 0x{x} ({s})", .{ channel, payload, try utils.sanitizeString(gpa, payload) });
     } else if (state.* == State.Play and packet.id == 0x0c) {
         // player update
         const on_ground = try data.readBool(req_reader);
-        std.log.info("player_update: on_ground {}", .{on_ground});
+        std.log.info("Got player_update: on_ground {}", .{on_ground});
     } else if (state.* == State.Play and packet.id == 0x0d) {
         // position update
         const x = try data.readDouble(req_reader);
         const y = try data.readDouble(req_reader);
         const z = try data.readDouble(req_reader);
         const on_ground = try data.readBool(req_reader);
-        std.log.info("position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
+        std.log.info("Got position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
         game.player.position = entities.fPos{ .x = x, .y = y, .z = z };
     } else if (state.* == State.Play and packet.id == 0x0e) {
@@ -215,7 +215,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const yaw = try data.readFloat(req_reader);
         const pitch = try data.readFloat(req_reader);
         const on_ground = try data.readBool(req_reader);
-        std.log.info("position_look_update: position ({}, {}, {}), yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
+        std.log.info("Got position_look_update: position ({}, {}, {}), yaw {}, pitch {}, on_ground {}", .{ x, y, z, yaw, pitch, on_ground });
 
         game.player.position = entities.fPos{ .x = x, .y = y, .z = z };
         game.player.look = [2]f32{ yaw, pitch };
@@ -224,24 +224,24 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const yaw = try data.readFloat(req_reader);
         const pitch = try data.readFloat(req_reader);
         const on_ground = try data.readBool(req_reader);
-        std.log.info("look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
+        std.log.info("Got look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
 
         game.player.look = [2]f32{ yaw, pitch };
     } else if (state.* == State.Play and packet.id == 0x00) {
         // teleport confirm
         const teleport_id = try data.readVarInt(req_reader);
-        std.log.info("teleport_confirm: id {}", .{teleport_id});
+        std.log.info("Got teleport_confirm: id {}", .{teleport_id});
     } else if (state.* == State.Play and packet.id == 0x0b) {
         // keep alive
         const timestamp = try data.readLong(req_reader);
-        std.log.info("keep_alive: timestamp {}", .{timestamp});
+        std.log.info("Got keep_alive: timestamp {}", .{timestamp});
         game.player.ping = @truncate((time - timestamp) * 2);
     } else if (state.* == State.Play and packet.id == 0x14) {
         // player digging
         const status = try data.readVarInt(req_reader);
         const pos = try data.readPosition(req_reader);
         const face = try data.readByte(req_reader);
-        std.log.info("player_digging: status {}, position ({}, {}, {}), face {}", .{ status, pos.x, pos.y, pos.z, face });
+        std.log.info("Got player_digging: status {}, position ({}, {}, {}), face {}", .{ status, pos.x, pos.y, pos.z, face });
 
         if (game.player.gamemode == 1 and status == 0 or game.player.gamemode == 0 and status == 2) { // TODO: saplings are broken without sending end digging
             // finished digging, break block
@@ -255,7 +255,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         const cursor_x = try data.readFloat(req_reader);
         const cursor_y = try data.readFloat(req_reader);
         const cursor_z = try data.readFloat(req_reader);
-        std.log.info("player_block_placement: position ({}, {}, {}), face {}, hand {}, cursor ({}, {}, {})", .{ pos.x, pos.y, pos.z, face, hand, cursor_x, cursor_y, cursor_z });
+        std.log.info("Got player_block_placement: position ({}, {}, {}), face {}, hand {}, cursor ({}, {}, {})", .{ pos.x, pos.y, pos.z, face, hand, cursor_x, cursor_y, cursor_z });
 
         const place_pos = world.applyFaceOffset(pos.x, pos.y, pos.z, face);
         const slot = 36 + game.player.selected_slot; // TODO: offhand
@@ -263,7 +263,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
     } else if (state.* == State.Play and packet.id == 0x1d) {
         // player animation
         const hand = try data.readVarInt(req_reader);
-        std.log.info("player_animation: hand {}", .{hand});
+        std.log.info("Got player_animation: hand {}", .{hand});
 
         // // jump
         // try io.writeVarInt(res_writer, player.eid); // entity id
@@ -276,19 +276,19 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
     } else if (state.* == State.Play and packet.id == 0x1a) {
         // player slot selection
         const slot = try data.readShort(req_reader);
-        std.log.info("player_slot_selection: slot {}", .{slot});
+        std.log.info("Got player_slot_selection: slot {}", .{slot});
         game.player.selected_slot = @intCast(slot);
     } else if (state.* == State.Play and packet.id == 0x15) {
         // entity action
         const entity_id = try data.readVarInt(req_reader);
         const action_id = try data.readVarInt(req_reader);
         const jump_boost = try data.readVarInt(req_reader);
-        std.log.info("entity_action: entity_id 0x{x}, action_id {}, jump_boost {}", .{ entity_id, action_id, jump_boost });
+        std.log.info("Got entity_action: entity_id 0x{x}, action_id {}, jump_boost {}", .{ entity_id, action_id, jump_boost });
     } else if (state.* == State.Play and packet.id == 0x02) {
         // chat message
         const message = try utils.sanitizeString(gpa, try data.readString(req_reader));
         defer gpa.free(message);
-        std.log.info("chat_message: {s}", .{message});
+        std.log.info("Got chat_message: {s}", .{message});
 
         if (message[0] == '/') {
             try game.processCommand(gpa, tcp_writer, state, message);
@@ -319,9 +319,9 @@ fn updateFixed(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, g
         _ = res_writer.consumeAll();
     }
 
-    // game tick
+    // game tick, TODO: tickspeed reduced when waiting on packages
     if (state.* == State.Play) {
-        try game.tick(gpa, tcp_writer, state, time, delta);
+        try game.tick(gpa, tcp_writer, state, delta);
     }
 }
 

@@ -21,6 +21,7 @@ const muted_keywords = [_][]const u8{
     "0x0d/03", "position_update",
     "0x0e/03", "position_look_update",
     "0x0f/03", "look_update",
+    "0x47/13", "time_update",
 };
 
 pub fn colorLogFn(

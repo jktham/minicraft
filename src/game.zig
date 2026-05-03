@@ -13,12 +13,14 @@ pub const Game = struct {
     player: player.Player,
     world: world.World,
     entities: entities.Entities,
+    time: i64, // world time in ticks (20 ticks per second)
 
     pub fn init() Game {
         return .{
             .player = player.Player.init(),
             .world = world.World.init(),
             .entities = entities.Entities.init(),
+            .time = 0,
         };
     }
 
@@ -157,14 +159,23 @@ pub const Game = struct {
         }
     }
 
-    pub fn tick(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, time: i64, delta: i64) !void {
-        _ = time; // autofix
+    /// main game loop, called every tick to update game state and send updates to client. delta is time in ms since last tick
+    pub fn tick(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, delta: i64) !void {
         _ = delta; // autofix
         var res_data: [1000]u8 = undefined;
         var w = std.Io.Writer.fixed(&res_data);
         const res_writer = &w;
 
-        // std.log.info("Game tick, time: {d}, delta: {d}", .{ time, delta });
+        // std.log.info("Game tick, time: {d}, delta: {d}", .{ self.time, delta });
+        self.time += 1;
+
+        // time update
+        if (@mod(self.time, 20) == 0) { // every second
+            try data.writeLong(res_writer, self.time); // world age in ticks
+            try data.writeLong(res_writer, @mod(self.time, 24000)); // time of day in ticks (0-23999)
+            try server.sendPacket(gpa, tcp_writer, .{ .id = 0x47, .data = res_writer.buffered() }, state.*);
+            _ = res_writer.consumeAll();
+        }
 
         // pick up nearby items
         const close_items = try self.entities.getCloseItems(gpa, .{ .x = self.player.position.x, .y = self.player.position.y + 1.0, .z = self.player.position.z }, 1.2);
