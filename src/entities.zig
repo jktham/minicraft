@@ -36,14 +36,9 @@ pub const Entities = struct {
         };
     }
 
-    pub fn spawnItem(self: *Entities, gpa: std.mem.Allocator, eid: i32, uuid: u128, position: fPos, stack: inventory.Stack) !void {
-        std.log.info("Spawning item entity with eid 0x{x}, uuid 0x{x}, position ({}, {}, {}), stack {}", .{ eid, uuid, position.x, position.y, position.z, stack });
-        try self.items.append(gpa, ItemEntity{
-            .eid = eid,
-            .uuid = uuid,
-            .position = position,
-            .stack = stack,
-        });
+    pub fn spawnItem(self: *Entities, gpa: std.mem.Allocator, item: ItemEntity) !void {
+        std.log.info("Spawning item entity with eid 0x{x}, uuid 0x{x}, position ({}, {}, {}), stack {}", .{ item.eid, item.uuid, item.position.x, item.position.y, item.position.z, item.stack });
+        try self.items.append(gpa, item);
     }
 
     pub fn destroyItem(self: *Entities, eid: i32) !void {

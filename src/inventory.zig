@@ -11,7 +11,7 @@ pub const Stack = struct {
 };
 
 pub const N_SLOTS = 46;
-pub const MAX_STACK = 64;
+pub const MAX_STACK = 99;
 
 pub const Inventory = struct {
     slots: [N_SLOTS]Stack,
@@ -27,12 +27,13 @@ pub const Inventory = struct {
     /// try to add the stack to the inventory, error if not enough space in the inventory. if there are already stacks of the same item, they will be filled up first.
     pub fn addStack(self: *Inventory, stack: Stack) !void {
         var count = stack.count;
-        for (&self.slots, 0..N_SLOTS) |*slot, i| {
+        for (&self.slots, 0..N_SLOTS) |*slot, i| { // existing stacks
             if (slot.id == stack.id and slot.damage == stack.damage and std.mem.eql(u8, slot.nbt, stack.nbt)) {
                 const new_count = slot.count + count;
                 if (new_count > MAX_STACK) {
                     slot.count = MAX_STACK;
                     count = new_count - MAX_STACK;
+                    self.changed[i] = true;
                     continue;
                 }
                 slot.count = new_count;
@@ -42,14 +43,24 @@ pub const Inventory = struct {
         }
         for (36..45) |i| { // hotbar first
             if (self.slots[i].id == .Empty) {
-                self.slots[i] = stack;
+                self.slots[i] = .{
+                    .id = stack.id,
+                    .count = count,
+                    .damage = stack.damage,
+                    .nbt = stack.nbt,
+                };
                 self.changed[i] = true;
                 return;
             }
         }
-        for (&self.slots, 0..N_SLOTS) |*slot, i| {
-            if (slot.id == .Empty) {
-                slot.* = stack;
+        for (0..46) |i| { // main inventory
+            if (self.slots[i].id == .Empty) {
+                self.slots[i] = .{
+                    .id = stack.id,
+                    .count = count,
+                    .damage = stack.damage,
+                    .nbt = stack.nbt,
+                };
                 self.changed[i] = true;
                 return;
             }

@@ -246,6 +246,14 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         if (game.player.gamemode == 1 and status == 0 or game.player.gamemode == 0 and status == 2) { // TODO: saplings are broken without sending end digging
             // finished digging, break block
             try game.breakBlock(gpa, tcp_writer, state, pos);
+        } else if (status == 4) {
+            // drop single item
+            const slot = 36 + game.player.selected_slot;
+            try game.dropItem(gpa, tcp_writer, state, slot, false);
+        } else if (status == 3) {
+            // drop entire stack
+            const slot = 36 + game.player.selected_slot;
+            try game.dropItem(gpa, tcp_writer, state, slot, true);
         }
     } else if (state.* == State.Play and packet.id == 0x1f) {
         // player block placement

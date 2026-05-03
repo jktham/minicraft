@@ -31,6 +31,7 @@ pub const Game = struct {
         self.player.eid = 0xbeef; // dummy entity id
         self.player.uuid = 0xf81d4fae7dec11d0a76500a0c91e6bf6; // dummy uuid
         self.player.gamemode = 0; // 0=survival, 1=creative
+        self.player.selected_slot = 0;
 
         if (self.player.first_join) {
             self.player.inventory.slots[36] = inventory.Stack{
@@ -62,20 +63,22 @@ pub const Game = struct {
         self.player.xp += 1;
 
         // create item entity
-        const eid = entities.randomEID();
-        const uuid = entities.randomUUID();
-        const fpos = entities.fPos{
-            .x = @as(f32, @floatFromInt(position.x)) + 0.5,
-            .y = @as(f32, @floatFromInt(position.y)) + 0.5,
-            .z = @as(f32, @floatFromInt(position.z)) + 0.5,
+        const item: entities.ItemEntity = .{
+            .eid = entities.randomEID(),
+            .uuid = entities.randomUUID(),
+            .position = entities.fPos{
+                .x = @as(f32, @floatFromInt(position.x)) + 0.5,
+                .y = @as(f32, @floatFromInt(position.y)) + 0.5,
+                .z = @as(f32, @floatFromInt(position.z)) + 0.5,
+            },
+            .stack = .{
+                .id = block.toItem(),
+                .count = 1,
+                .damage = 0,
+                .nbt = &[_]u8{0},
+            },
         };
-        const stack = inventory.Stack{
-            .id = block.toItem(),
-            .count = 1,
-            .damage = 0,
-            .nbt = &[_]u8{0},
-        };
-        try self.entities.spawnItem(gpa, eid, uuid, fpos, stack);
+        try self.entities.spawnItem(gpa, item);
 
         // update client
         try self.sendBlockChange(gpa, tcp_writer, state, position);
@@ -94,7 +97,7 @@ pub const Game = struct {
             std.log.warn("Cannot place item {}", .{stack.id});
             valid = false;
         }
-        if (valid and self.player.inventory.slots[slot].count < 1) {
+        if (valid and self.player.inventory.slots[slot].count == 0) {
             std.log.warn("Cannot place block at ({}, {}, {}) because slot {} is empty", .{ position.x, position.y, position.z, slot });
             valid = false;
         }
@@ -139,6 +142,37 @@ pub const Game = struct {
         // update client
         try self.sendBlockChange(gpa, tcp_writer, state, position);
         try self.sendInventory(gpa, tcp_writer, state);
+    }
+
+    pub fn dropItem(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, slot: u8, drop_stack: bool) !void {
+        const stack = self.player.inventory.slots[slot];
+        if (stack.count == 0) {
+            std.log.warn("Cannot drop item from slot {} because it is empty", .{slot});
+            return;
+        }
+        try self.player.inventory.removeCount(slot, if (drop_stack) stack.count else 1);
+
+        // create item entity
+        const item: entities.ItemEntity = .{
+            .eid = entities.randomEID(),
+            .uuid = entities.randomUUID(),
+            .position = entities.fPos{
+                .x = self.player.position.x - std.math.sin(self.player.look[0] / 180.0 * std.math.pi) * 2,
+                .y = self.player.position.y + 0.5,
+                .z = self.player.position.z + std.math.cos(self.player.look[0] / 180.0 * std.math.pi) * 2,
+            },
+            .stack = .{
+                .id = stack.id,
+                .count = if (drop_stack) stack.count else 1,
+                .damage = stack.damage,
+                .nbt = stack.nbt,
+            },
+        };
+        try self.entities.spawnItem(gpa, item);
+
+        // update client
+        try self.sendInventory(gpa, tcp_writer, state);
+        try self.sendItemEntities(gpa, tcp_writer, state);
     }
 
     pub fn processChat(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, message: []const u8, player_name: []const u8) !void {
