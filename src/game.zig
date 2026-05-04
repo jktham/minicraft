@@ -198,8 +198,31 @@ pub const Game = struct {
     }
 
     pub fn processCommand(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, message: []const u8) !void {
-        if (std.mem.eql(u8, message, "/ping")) {
+        if (std.mem.startsWith(u8, message, "/help")) {
+            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Available commands: /help, /ping, /gm\"}}", .{});
+            defer gpa.free(message_json);
+            try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+        } else if (std.mem.startsWith(u8, message, "/ping")) {
             const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"ping: {d} ms\"}}", .{player.ping});
+            defer gpa.free(message_json);
+            try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+        } else if (std.mem.startsWith(u8, message, "/gm")) {
+            var parts = std.mem.splitScalar(u8, message, ' ');
+            _ = parts.next(); // skip command part
+            const mode = parts.next();
+            if (mode != null and std.mem.eql(u8, mode.?, "0")) {
+                player.gamemode = 0;
+                try self.sendGameState(gpa, tcp_writer, state, 3, 0); // set survival mode
+            } else if (mode != null and std.mem.eql(u8, mode.?, "1")) {
+                player.gamemode = 1;
+                try self.sendGameState(gpa, tcp_writer, state, 3, 1); // set creative mode
+            } else {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Unknown gamemode (0 or 1): {s}\"}}", .{mode orelse "null"});
+                defer gpa.free(message_json);
+                try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                return;
+            }
+            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Set gamemode to {d}\"}}", .{player.gamemode});
             defer gpa.free(message_json);
             try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
         } else {
@@ -395,6 +418,19 @@ pub const Game = struct {
         try data.writeString(res_writer, message); // message
         try data.writeByte(res_writer, mode); // position (0 for chat, 1 for system message, 2 for above hotbar)
         try server.sendPacket(gpa, tcp_writer, .{ .id = 0x0f, .data = res_writer.buffered() }, state.*);
+        _ = res_writer.consumeAll();
+    }
+
+    pub fn sendGameState(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, reason: u8, value: f32) !void {
+        _ = self; // autofix
+        var res_data: [1000]u8 = undefined;
+        var w = std.Io.Writer.fixed(&res_data);
+        const res_writer = &w;
+
+        std.log.info("Sending game state change", .{});
+        try data.writeByte(res_writer, reason); // reason
+        try data.writeFloat(res_writer, value); // value
+        try server.sendPacket(gpa, tcp_writer, .{ .id = 0x1e, .data = res_writer.buffered() }, state.*);
         _ = res_writer.consumeAll();
     }
 };
