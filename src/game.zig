@@ -199,7 +199,7 @@ pub const Game = struct {
 
     pub fn processCommand(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, message: []const u8) !void {
         if (std.mem.startsWith(u8, message, "/help")) {
-            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Available commands: /help, /ping, /gm\"}}", .{});
+            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Available commands: \n/help \n/ping \n/gm <mode> \n/give <id> <amount> \n/items\"}}", .{});
             defer gpa.free(message_json);
             try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
         } else if (std.mem.startsWith(u8, message, "/ping")) {
@@ -210,19 +210,95 @@ pub const Game = struct {
             var parts = std.mem.splitScalar(u8, message, ' ');
             _ = parts.next(); // skip command part
             const mode = parts.next();
-            if (mode != null and std.mem.eql(u8, mode.?, "0")) {
+            if (mode == null) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Invalid format, expected \\\"/gm <mode>\\\"\"}}", .{});
+                defer gpa.free(message_json);
+                try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                return;
+            }
+            if (std.mem.eql(u8, mode.?, "0")) {
                 player.gamemode = 0;
                 try self.sendGameState(gpa, tcp_writer, state, 3, 0); // set survival mode
-            } else if (mode != null and std.mem.eql(u8, mode.?, "1")) {
+            } else if (std.mem.eql(u8, mode.?, "1")) {
                 player.gamemode = 1;
                 try self.sendGameState(gpa, tcp_writer, state, 3, 1); // set creative mode
             } else {
-                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Unknown gamemode (0 or 1): {s}\"}}", .{mode orelse "null"});
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Unknown gamemode (0 or 1): {s}\"}}", .{mode.?});
                 defer gpa.free(message_json);
                 try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
                 return;
             }
             const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Set gamemode to {d}\"}}", .{player.gamemode});
+            defer gpa.free(message_json);
+            try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+        } else if (std.mem.startsWith(u8, message, "/give")) {
+            var parts = std.mem.splitScalar(u8, message, ' ');
+            _ = parts.next(); // skip command part
+            const id_str = parts.next();
+            const amount_str = parts.next();
+            if (id_str == null or amount_str == null) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Invalid format, expected \\\"/give <id> <amount>\\\"\"}}", .{});
+                defer gpa.free(message_json);
+                try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                return;
+            }
+            const id = std.fmt.parseInt(i32, id_str.?, 10) catch -1;
+            if (id < 0) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Invalid id: {s}\"}}", .{id_str.?});
+                defer gpa.free(message_json);
+                try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                return;
+            }
+            const item = std.enums.fromInt(ids.Item, id);
+            if (item == null) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Unknown item: {d}\"}}", .{id});
+                defer gpa.free(message_json);
+                try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                return;
+            }
+            const amount = std.fmt.parseInt(i32, amount_str.?, 10) catch -1;
+            if (amount <= 0) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Invalid amount: {s}\"}}", .{amount_str.?});
+                defer gpa.free(message_json);
+                try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                return;
+            }
+            if (amount > inventory.MAX_STACK) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Amount cannot be greater than {}\"}}", .{inventory.MAX_STACK});
+                defer gpa.free(message_json);
+                try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                return;
+            }
+
+            player.inventory.addStack(.{
+                .id = item.?,
+                .count = @intCast(amount),
+                .damage = 0,
+                .nbt = &[_]u8{0},
+            }) catch |err| {
+                if (err == error.InventoryFull) {
+                    const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Inventory full, cannot give item {d} x {d}\"}}", .{ id, amount });
+                    defer gpa.free(message_json);
+                    try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                } else {
+                    return err;
+                }
+            };
+            try self.sendInventory(gpa, tcp_writer, state, player);
+            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Gave item {d} ({}) x {d}\"}}", .{ id, item.?, amount });
+            defer gpa.free(message_json);
+            try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+        } else if (std.mem.startsWith(u8, message, "/items")) {
+            var items = std.ArrayList([]const u8).empty;
+            defer items.deinit(gpa);
+            for (std.enums.values(ids.Item)) |item| {
+                if (item == ids.Item.Empty) continue;
+                const item_str = try std.fmt.allocPrint(gpa, "{}: {}", .{ @intFromEnum(item), item });
+                try items.append(gpa, item_str);
+            }
+            const items_joined = try std.mem.join(gpa, "\n", items.items);
+
+            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Items: \n{s}\"}}", .{items_joined});
             defer gpa.free(message_json);
             try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
         } else {
@@ -323,7 +399,7 @@ pub const Game = struct {
         var w = std.Io.Writer.fixed(&res_data);
         const res_writer = &w;
 
-        std.log.info("Sending xp", .{});
+        std.log.info("Sending xp update", .{});
         // set experience, http://minecraft.gamepedia.com/Experience%23Leveling_up
         try data.writeFloat(res_writer, @as(f32, @floatFromInt(@mod(player.xp, 10))) / 10.0); // xp bar (0.0-1.0)
         try data.writeVarInt(res_writer, @divFloor(player.xp, 10)); // level
@@ -421,6 +497,7 @@ pub const Game = struct {
         _ = res_writer.consumeAll();
     }
 
+    /// send game state change https://minecraft.wiki/w/Protocol?oldid=2772385#Change_Game_State
     pub fn sendGameState(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, reason: u8, value: f32) !void {
         _ = self; // autofix
         var res_data: [1000]u8 = undefined;
