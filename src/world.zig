@@ -107,3 +107,21 @@ pub fn applyFaceOffset(x: i32, y: i32, z: i32, face: i32) data.Position {
         else => .{ .x = @intCast(x), .y = @intCast(y), .z = @intCast(z) },
     };
 }
+
+/// returns chunk indices starting from the center and going outwards
+pub fn getChunkSpiralIndices(gpa: std.mem.Allocator) !std.ArrayList(struct { usize, usize }) {
+    const C = N_CHUNKS / 2;
+    var indices = std.ArrayList(struct { usize, usize }).empty;
+    for (0..N_CHUNKS + 1) |i| {
+        for (0..N_CHUNKS) |x| {
+            for (0..N_CHUNKS) |z| {
+                const dist_x = @abs(@as(i32, @intCast(x)) - C);
+                const dist_z = @abs(@as(i32, @intCast(z)) - C);
+                if (dist_x + dist_z == i) {
+                    try indices.append(gpa, .{ x, z });
+                }
+            }
+        }
+    }
+    return indices;
+}

@@ -41,7 +41,7 @@ pub const Game = struct {
             player.name = try gpa.dupe(u8, name); // reallocate to keep persistent
             player.eid = entities.randomEID();
             player.uuid = entities.randomUUID();
-            player.gamemode = 1; // 0=survival, 1=creative
+            player.gamemode = 0; // 0=survival, 1=creative
 
             player.inventory.slots[36] = inventory.Stack{
                 .id = ids.Item.IronPickaxe,
@@ -350,35 +350,37 @@ pub const Game = struct {
         const res_writer = &w;
 
         std.log.info("Sending chunk data", .{});
-        for (0..world.N_CHUNKS) |chunk_x| {
-            for (0..world.N_CHUNKS) |chunk_z| {
-                var chunk_data: [1000000]u8 = undefined;
-                var cw = std.Io.Writer.fixed(&chunk_data);
-                const chunk_writer = &cw;
+        var indices = try world.getChunkSpiralIndices(gpa);
+        defer indices.deinit(gpa);
+        for (indices.items) |chunk_index| {
+            const chunk_x = chunk_index[0];
+            const chunk_z = chunk_index[1];
+            var chunk_data: [1000000]u8 = undefined;
+            var cw = std.Io.Writer.fixed(&chunk_data);
+            const chunk_writer = &cw;
 
-                for (0..world.N_SUBCHUNKS) |chunk_y| {
-                    try data.writeByte(chunk_writer, 8); // bits per block
-                    try data.writeVarInt(chunk_writer, ids.palette.len); // palette length
-                    for (ids.palette) |p| {
-                        try data.writeVarInt(chunk_writer, p); // palette entry
-                    }
-                    try data.writeVarInt(chunk_writer, (4096 * 8) / 64); // data length (number of longs)
-                    try data.writeBytes(chunk_writer, try self.world.getChunkPointer(@intCast(chunk_x), @intCast(chunk_y), @intCast(chunk_z))); // block data (4096 blocks per subchunk)
-                    try data.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // block light (4 bits per block)
-                    try data.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // sky light (4 bits per block)
+            for (0..world.N_SUBCHUNKS) |chunk_y| {
+                try data.writeByte(chunk_writer, 8); // bits per block
+                try data.writeVarInt(chunk_writer, ids.palette.len); // palette length
+                for (ids.palette) |p| {
+                    try data.writeVarInt(chunk_writer, p); // palette entry
                 }
-
-                try data.writeInt(res_writer, @as(i32, @intCast(chunk_x))); // chunk x
-                try data.writeInt(res_writer, @as(i32, @intCast(chunk_z))); // chunk z
-                try data.writeBool(res_writer, true); // ground up continuous
-                try data.writeVarInt(res_writer, 0xffff); // primary bit mask
-                try data.writeVarInt(res_writer, @intCast(chunk_writer.buffered().len + 256)); // data length
-                try data.writeBytes(res_writer, chunk_writer.buffered()); // data
-                try data.writeBytes(res_writer, &[_]u8{127} ** 256); // biomes
-                try data.writeVarInt(res_writer, 0); // number of block entities
-                try server.sendPacket(gpa, tcp_writer, .{ .id = 0x20, .data = res_writer.buffered() }, state.*);
-                _ = res_writer.consumeAll();
+                try data.writeVarInt(chunk_writer, (4096 * 8) / 64); // data length (number of longs)
+                try data.writeBytes(chunk_writer, try self.world.getChunkPointer(@intCast(chunk_x), @intCast(chunk_y), @intCast(chunk_z))); // block data (4096 blocks per subchunk)
+                try data.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // block light (4 bits per block)
+                try data.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // sky light (4 bits per block)
             }
+
+            try data.writeInt(res_writer, @as(i32, @intCast(chunk_x))); // chunk x
+            try data.writeInt(res_writer, @as(i32, @intCast(chunk_z))); // chunk z
+            try data.writeBool(res_writer, true); // ground up continuous
+            try data.writeVarInt(res_writer, 0xffff); // primary bit mask
+            try data.writeVarInt(res_writer, @intCast(chunk_writer.buffered().len + 256)); // data length
+            try data.writeBytes(res_writer, chunk_writer.buffered()); // data
+            try data.writeBytes(res_writer, &[_]u8{127} ** 256); // biomes
+            try data.writeVarInt(res_writer, 0); // number of block entities
+            try server.sendPacket(gpa, tcp_writer, .{ .id = 0x20, .data = res_writer.buffered() }, state.*);
+            _ = res_writer.consumeAll();
         }
     }
 
