@@ -52,7 +52,7 @@ pub const Game = struct {
             player.inventory.changed[36] = true;
 
             const center = @as(f32, world.N_CHUNKS * world.N_BLOCKS) / 2.0;
-            player.position = entities.fPos{ .x = center, .y = 20, .z = center };
+            player.position = entities.fPos{ .x = center, .y = 96, .z = center };
             player.look = [2]f32{ 0, 0 };
 
             try self.players.append(gpa, player);

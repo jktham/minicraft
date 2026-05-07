@@ -29,11 +29,23 @@ pub const World = struct {
                                 const global_y: i32 = @intCast(chunk_y * N_BLOCKS + local_y);
                                 const global_z: i32 = @intCast(chunk_z * N_BLOCKS + local_z);
 
-                                if (global_y == 8) {
+                                const noise_scale: f32 = 0.08;
+                                const height_scale: f32 = 64.0;
+                                const height_offset: f32 = 32.0;
+
+                                const x: f32 = @floatFromInt(global_x);
+                                const z: f32 = @floatFromInt(global_z);
+
+                                const p = perlin(x * noise_scale, z * noise_scale);
+                                const height: i32 = @intFromFloat(p * height_scale + height_offset);
+
+                                if (global_y == height) {
                                     try self.setBlock(global_x, global_y, global_z, ids.Block.Grass);
+                                } else if (global_y == height - 1) {
+                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Dirt);
                                 } else if (global_y == 0) {
                                     try self.setBlock(global_x, global_y, global_z, ids.Block.Bedrock);
-                                } else if (global_y < 8) {
+                                } else if (global_y < height) {
                                     try self.setBlock(global_x, global_y, global_z, ids.Block.Stone);
                                 } else {
                                     try self.setBlock(global_x, global_y, global_z, ids.Block.Air);
@@ -124,4 +136,46 @@ pub fn getChunkSpiralIndices(gpa: std.mem.Allocator) !std.ArrayList(struct { usi
         }
     }
     return indices;
+}
+
+fn smoothstep(a: f32, b: f32, w: f32) f32 {
+    return (b - a) * (3.0 - w * 2.0) * w * w + a;
+}
+
+var prng = std.Random.DefaultPrng.init(0);
+fn randomGradient(ix: i32, iy: i32) struct { f32, f32 } {
+    prng.seed(@as(u64, @intCast(@as(u32, @bitCast(ix)))) << 32 | @as(u64, @intCast(@as(u32, @bitCast(iy)))));
+    const r = std.Random.float(prng.random(), f32) * std.math.pi * 2.0; // [0, 2*pi)
+    return .{ std.math.cos(r), std.math.sin(r) }; // [-1, 1]
+}
+
+fn dotGridGradient(ix: i32, iy: i32, x: f32, y: f32) f32 {
+    const gradient = randomGradient(ix, iy);
+    const dx = x - @as(f32, @floatFromInt(ix));
+    const dy = y - @as(f32, @floatFromInt(iy));
+    return dx * gradient[0] + dy * gradient[1];
+}
+
+/// perlin noise implementation stolen from https://en.wikipedia.org/w/index.php?title=Perlin_noise&oldid=1230993513 <3
+pub fn perlin(x: f32, y: f32) f32 {
+    // grid points
+    const x0: i32 = @floor(x);
+    const x1: i32 = x0 + 1;
+    const y0: i32 = @floor(y);
+    const y1: i32 = y0 + 1;
+
+    // interpolation weights
+    const sx: f32 = x - @as(f32, @floatFromInt(x0));
+    const sy: f32 = y - @as(f32, @floatFromInt(y0));
+
+    // interpolate between grid point gradients
+    const n0 = dotGridGradient(x0, y0, x, y);
+    const n1 = dotGridGradient(x1, y0, x, y);
+    const ix0 = smoothstep(n0, n1, sx);
+
+    const n2 = dotGridGradient(x0, y1, x, y);
+    const n3 = dotGridGradient(x1, y1, x, y);
+    const ix1 = smoothstep(n2, n3, sx);
+
+    return smoothstep(ix0, ix1, sy) * 0.5 + 0.5; // [0, 1]
 }
