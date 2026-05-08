@@ -1,27 +1,15 @@
 // https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
 
-/// blockid(9) + meta(4), max length 256
-pub const palette = [_]u13{
-    0b000000000_0000, // air
-    0b000000001_0000, // stone
-    0b000000010_0000, // grass
-    0b000000011_0000, // dirt
-    0b000000100_0000, // cobblestone
-    0b000000101_0000, // planks
-    0b000000110_0000, // sapling
-    0b000000111_0000, // bedrock
-};
-
-/// index into palette
-pub const Block = enum(u8) {
-    Air = 0,
-    Stone = 1,
-    Grass = 2,
-    Dirt = 3,
-    Cobblestone = 4,
-    Planks = 5,
-    Sapling = 6,
-    Bedrock = 7,
+/// blockid(9) + meta(4)
+pub const Block = enum(u13) {
+    Air = 0b000000000_0000,
+    Stone = 0b000000001_0000,
+    Grass = 0b000000010_0000,
+    Dirt = 0b000000011_0000,
+    Cobblestone = 0b000000100_0000,
+    Planks = 0b000000101_0000,
+    Sapling = 0b000000110_0000,
+    Bedrock = 0b000000111_0000,
 
     /// convert block id to item id via mining, returns .Empty if the block cannot be converted to an item (e.g. air)
     pub fn toItem(block: Block) Item {

@@ -9,7 +9,7 @@ pub const N_BLOCKS = 16; // number of blocks in each direction within a subchunk
 
 pub const World = struct {
     /// chunk xzy, local yzx
-    chunks: [N_CHUNKS][N_CHUNKS][N_SUBCHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]u8,
+    chunks: [N_CHUNKS][N_CHUNKS][N_SUBCHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]u13,
 
     pub fn init() World {
         return .{
@@ -67,7 +67,7 @@ pub const World = struct {
         const chunk_y = @divFloor(y, 16);
         const chunk_z = @divFloor(z, 16);
 
-        const local_x = @mod(7 - x, 16); // alignment with chunk data
+        const local_x = @mod(x, 16);
         const local_y = @mod(y, 16);
         const local_z = @mod(z, 16);
 
@@ -83,7 +83,7 @@ pub const World = struct {
         const chunk_y = @divFloor(y, 16);
         const chunk_z = @divFloor(z, 16);
 
-        const local_x = @mod(7 - x, 16); // alignment with chunk data
+        const local_x = @mod(x, 16);
         const local_y = @mod(y, 16);
         const local_z = @mod(z, 16);
 
@@ -91,9 +91,9 @@ pub const World = struct {
     }
 
     /// pointer to flat array of 4096 blocks in the subchunk, for direct writing to network buffer in local yzx order
-    pub fn getChunkPointer(self: *World, chunk_x: i32, chunk_y: i32, chunk_z: i32) !*[4096]u8 {
+    pub fn getSubchunkPointer(self: *World, chunk_x: i32, chunk_y: i32, chunk_z: i32) !*[4096]u13 {
         if (chunk_x < 0 or chunk_x >= N_CHUNKS or chunk_y < 0 or chunk_y >= N_SUBCHUNKS or chunk_z < 0 or chunk_z >= N_CHUNKS) {
-            std.log.err("Attempted to get chunk pointer outside of world bounds at ({}, {}, {})", .{ chunk_x, chunk_y, chunk_z });
+            std.log.err("Attempted to get subchunk pointer outside of world bounds at ({}, {}, {})", .{ chunk_x, chunk_y, chunk_z });
             return error.OutOfBounds;
         }
         return @ptrCast(&self.chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)]);

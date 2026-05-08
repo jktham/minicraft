@@ -962,7 +962,7 @@ test "testStack" {
     var reader = std.Io.Reader.fixed(&buf);
     var writer = std.Io.Writer.fixed(&buf);
 
-    const values = [_]ids.Stack{
+    const values = [_]inventory.Stack{
         .{ .id = ids.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} },
         .{ .id = ids.Item.Stone, .count = 64, .damage = 0, .nbt = &[_]u8{0} },
         .{ .id = ids.Item.Grass, .count = 1, .damage = 5, .nbt = &[_]u8{0x01} }, // TODO: only 1-byte nbt array supported!
@@ -1002,6 +1002,72 @@ test "testStack" {
         };
         std.testing.expect(std.mem.eql(u8, read_value.nbt, v.nbt)) catch |err| {
             print("read 0x{x}, expected 0x{x} at index {}\n", .{ read_value.nbt, v.nbt, i });
+            return err;
+        };
+    }
+}
+
+/// write 4096 blocks (1 subchunk) as a compacted rtl u64 array of u13 values, as defined in https://c4k3.github.io/wiki.vg/Chunk_Format.html#Compacted_data_array
+pub fn writeSubchunk(writer: *std.Io.Writer, blocks: *[4096]u13) !void {
+    var long: u64 = 0;
+    var offset: u6 = 0;
+    var count: u64 = 0;
+
+    for (blocks) |block| {
+        long |= @shlWithOverflow(@as(u64, block) & 0x1FFF, offset)[0];
+        offset, const overflow = @addWithOverflow(offset, 13);
+
+        if (overflow == 1) {
+            try writeLong(writer, @bitCast(long));
+            count += 1;
+
+            const rem = std.math.rotr(u64, block, 13 - offset);
+            const mask = (@as(u64, 1) << offset) - 1;
+            long = rem & mask;
+        }
+    }
+
+    std.debug.assert(count == 832); // 4096 * 13 / 64 = 832 longs
+}
+
+test "testSubChunk" {
+    var buf: [10000]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
+
+    // example from https://c4k3.github.io/wiki.vg/Chunk_Format.html#Compacted_data_array
+    const values = [_]u13{
+        0b000000010_0000,
+        0b000000011_0000,
+        0b000000011_0000,
+        0b000000011_0001,
+        0b000000001_0000,
+        0b000000001_0000,
+        0b000000001_0011,
+        0b000001101_0000,
+        0b000001101_0000,
+        0b010000001_0000,
+    };
+    var blocks: [4096]u13 = undefined;
+    for (&blocks, 0..) |*block, i| {
+        if (i < values.len) {
+            block.* = values[i];
+        } else {
+            block.* = 0;
+        }
+    }
+    try writeSubchunk(&writer, &blocks);
+    try writer.flush();
+
+    const bytes = [_]u8{
+        // zig fmt: off
+        0b00000001, 0b00000000, 0b00011000, 0b10000000, 0b11000000, 0b00000110, 0b00000000, 0b00100000,
+        0b00000010, 0b00000000, 0b11010000, 0b00000110, 0b10000000, 0b00000100, 0b11000000, 0b00100000,
+        0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000001,
+        // zig fmt: on
+    };
+    for (bytes, 0..) |b, i| {
+        std.testing.expect(buf[i] == b) catch |err| {
+            print("wrote 0b{b:0>8}, expected 0b{b:0>8} at index {}\n", .{ buf[i], b, i });
             return err;
         };
     }

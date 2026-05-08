@@ -387,7 +387,7 @@ pub const Game = struct {
         std.log.info("Sending block change", .{});
         const block = try self.world.getBlock(@intCast(position.x), @intCast(position.y), @intCast(position.z));
         try data.writePosition(res_writer, position); // position
-        try data.writeVarInt(res_writer, ids.palette[@intFromEnum(block)]); // block id
+        try data.writeVarInt(res_writer, @intFromEnum(block)); // block id
         try server.sendPacket(gpa, tcp_writer, .{ .id = 0x0B, .data = res_writer.buffered() }, state.*);
         _ = res_writer.consumeAll();
     }
@@ -459,13 +459,11 @@ pub const Game = struct {
             const chunk_writer = &cw;
 
             for (0..world.N_SUBCHUNKS) |chunk_y| {
-                try data.writeByte(chunk_writer, 8); // bits per block
-                try data.writeVarInt(chunk_writer, ids.palette.len); // palette length
-                for (ids.palette) |p| {
-                    try data.writeVarInt(chunk_writer, p); // palette entry
-                }
-                try data.writeVarInt(chunk_writer, (4096 * 8) / 64); // data length (number of longs)
-                try data.writeBytes(chunk_writer, try self.world.getChunkPointer(@intCast(chunk_x), @intCast(chunk_y), @intCast(chunk_z))); // block data (4096 blocks per subchunk)
+                try data.writeByte(chunk_writer, 13); // bits per block
+                try data.writeVarInt(chunk_writer, 0); // palette length
+                try data.writeVarInt(chunk_writer, (4096 * 13) / 64); // data length (number of longs)
+                const chunk_ptr = try self.world.getSubchunkPointer(@intCast(chunk_x), @intCast(chunk_y), @intCast(chunk_z));
+                try data.writeSubchunk(chunk_writer, chunk_ptr); // block data (4096 blocks per subchunk)
                 try data.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // block light (4 bits per block)
                 try data.writeBytes(chunk_writer, &[_]u8{0xff} ** 2048); // sky light (4 bits per block)
             }
@@ -476,7 +474,7 @@ pub const Game = struct {
             try data.writeVarInt(res_writer, 0xffff); // primary bit mask
             try data.writeVarInt(res_writer, @intCast(chunk_writer.buffered().len + 256)); // data length
             try data.writeBytes(res_writer, chunk_writer.buffered()); // data
-            try data.writeBytes(res_writer, &[_]u8{127} ** 256); // biomes
+            try data.writeBytes(res_writer, &[_]u8{3} ** 256); // biomes
             try data.writeVarInt(res_writer, 0); // number of block entities
             try server.sendPacket(gpa, tcp_writer, .{ .id = 0x20, .data = res_writer.buffered() }, state.*);
             _ = res_writer.consumeAll();
