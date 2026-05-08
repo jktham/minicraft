@@ -1,8 +1,8 @@
 const std = @import("std");
 const print = std.debug.print;
 
-const ids = @import("ids.zig");
 const inventory = @import("inventory.zig");
+const palette = @import("palette.zig");
 
 test "testBuf" {
     var buf: [1000]u8 = undefined;
@@ -937,23 +937,29 @@ test "testPosition" {
 }
 
 pub fn readStack(reader: *std.Io.Reader) !inventory.Stack {
-    const id: ids.Item = @enumFromInt(try readShort(reader));
-    if (id == ids.Item.Empty) { // -1
-        return .{ .id = ids.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} }; // empty slot, no more data
+    const id = try readShort(reader);
+    if (id == -1) { // empty
+        return .{ .item = palette.Item.empty, .count = 0, .nbt = &[_]u8{0} }; // empty slot, no more data
     }
     const count = try readByte(reader);
     const damage = try readShort(reader);
     const nbt = try readBytes(reader, 1); // TODO: read NBT data
-    return .{ .id = id, .count = count, .damage = damage, .nbt = nbt };
+
+    const item = std.enums.fromInt(palette.Item, palette.item(@bitCast(id), @bitCast(damage)));
+    if (item == null) {
+        return .{ .item = palette.Item.err, .count = count, .nbt = nbt };
+    }
+    return .{ .item = item.?, .count = count, .nbt = nbt };
 }
 
 pub fn writeStack(writer: *std.Io.Writer, stack: inventory.Stack) !void {
-    try writeShort(writer, @intFromEnum(stack.id));
-    if (stack.id == ids.Item.Empty) {
+    if (stack.item == palette.Item.empty) {
+        try writeShort(writer, -1);
         return; // empty slot, no more data
     }
+    try writeShort(writer, @bitCast(stack.item.id()));
     try writeByte(writer, stack.count);
-    try writeShort(writer, stack.damage);
+    try writeShort(writer, @bitCast(stack.item.meta()));
     try writeBytes(writer, stack.nbt);
 }
 
@@ -963,9 +969,9 @@ test "testStack" {
     var writer = std.Io.Writer.fixed(&buf);
 
     const values = [_]inventory.Stack{
-        .{ .id = ids.Item.Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} },
-        .{ .id = ids.Item.Stone, .count = 64, .damage = 0, .nbt = &[_]u8{0} },
-        .{ .id = ids.Item.Grass, .count = 1, .damage = 5, .nbt = &[_]u8{0x01} }, // TODO: only 1-byte nbt array supported!
+        .{ .item = palette.Item.empty, .count = 0, .nbt = &[_]u8{0} },
+        .{ .item = palette.Item.stone, .count = 64, .nbt = &[_]u8{0} },
+        .{ .item = palette.Item.dirt_coarse, .count = 1, .nbt = &[_]u8{0x01} }, // TODO: only 1-byte nbt array supported!
     };
     for (values) |v| {
         try writeStack(&writer, v);
@@ -981,9 +987,9 @@ test "testStack" {
         0b00000000, 0b00000000,
         0b00000000,
 
-        0b00000000, 0b00000010,
+        0b00000000, 0b00000011,
         0b00000001,
-        0b00000000, 0b00000101,
+        0b00000000, 0b00000001,
         0b00000001,
         // zig fmt: on
     };
@@ -996,7 +1002,7 @@ test "testStack" {
 
     for (values, 0..) |v, i| {
         const read_value = try readStack(&reader);
-        std.testing.expect(std.meta.eql(.{ read_value.id, read_value.count, read_value.damage }, .{ v.id, v.count, v.damage })) catch |err| {
+        std.testing.expect(std.meta.eql(.{ read_value.item, read_value.count }, .{ v.item, v.count })) catch |err| {
             print("read {}, expected {} at index {}\n", .{ read_value, v, i });
             return err;
         };

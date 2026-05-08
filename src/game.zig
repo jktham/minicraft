@@ -3,8 +3,8 @@ const std = @import("std");
 const _player = @import("player.zig");
 const data = @import("data.zig");
 const entities = @import("entities.zig");
-const ids = @import("ids.zig");
 const inventory = @import("inventory.zig");
+const palette = @import("palette.zig");
 const server = @import("server.zig");
 const utils = @import("utils.zig");
 const world = @import("world.zig");
@@ -44,9 +44,8 @@ pub const Game = struct {
             player.gamemode = 0; // 0=survival, 1=creative
 
             player.inventory.slots[36] = inventory.Stack{
-                .id = ids.Item.IronPickaxe,
+                .item = palette.Item.iron_pickaxe,
                 .count = 99,
-                .damage = 0,
                 .nbt = &[_]u8{0},
             };
             player.inventory.changed[36] = true;
@@ -65,13 +64,13 @@ pub const Game = struct {
     /// validate and break block, then update client
     pub fn breakBlock(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, position: data.Position) !void {
         const block = try self.world.getBlock(@intCast(position.x), @intCast(position.y), @intCast(position.z));
-        if (block == ids.Block.Air) {
-            std.log.warn("Cannot break block at ({}, {}, {}) because it is already air", .{ position.x, position.y, position.z });
+        if (!block.mineable()) {
+            std.log.warn("Cannot break block at ({}, {}, {}) because {} is not breakable", .{ position.x, position.y, position.z, block });
             try self.sendBlockChange(gpa, tcp_writer, state, position); // sync client
             return;
         }
 
-        try self.world.setBlock(@intCast(position.x), @intCast(position.y), @intCast(position.z), ids.Block.Air);
+        try self.world.setBlock(@intCast(position.x), @intCast(position.y), @intCast(position.z), palette.Block.air);
         player.xp += 1;
 
         // create item entity
@@ -84,9 +83,8 @@ pub const Game = struct {
                 .z = @as(f32, @floatFromInt(position.z)) + 0.5,
             },
             .stack = .{
-                .id = block.toItem(),
+                .item = block.mine(),
                 .count = 1,
-                .damage = 0,
                 .nbt = &[_]u8{0},
             },
         };
@@ -102,12 +100,12 @@ pub const Game = struct {
     pub fn placeBlock(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, position: data.Position) !void {
         const slot = 36 + player.selected_slot; // TODO: offhand
         const stack = player.inventory.slots[slot];
-        const block = stack.id.toBlock();
+        const block = stack.item.place();
         var valid = true;
 
         // inventory checks
-        if (valid and block == ids.Block.Air) {
-            std.log.warn("Cannot place item {}", .{stack.id});
+        if (valid and !stack.item.placeable()) {
+            std.log.warn("Cannot place block at ({}, {}, {}) because {} is not placeable", .{ position.x, position.y, position.z, stack.item });
             valid = false;
         }
         if (valid and player.inventory.slots[slot].count == 0) {
@@ -121,7 +119,7 @@ pub const Game = struct {
             valid = false;
         }
         const current_block = try self.world.getBlock(position.x, position.y, position.z);
-        if (valid and current_block != ids.Block.Air) {
+        if (valid and !current_block.replaceable()) {
             std.log.warn("Cannot place block at ({}, {}, {}) because it is occupied by block {}", .{ position.x, position.y, position.z, current_block });
             valid = false;
         }
@@ -136,7 +134,7 @@ pub const Game = struct {
             std.log.warn("Cannot place block at ({}, {}, {}) because it is too far away", .{ position.x, position.y, position.z });
             valid = false;
         }
-        if (valid and utils.sameBlock(player.position, position_center) or utils.sameBlock(.{ .x = player.position.x, .y = player.position.y + 1, .z = player.position.z }, position_center)) {
+        if (valid and (utils.sameBlockCoords(player.position, position_center) or utils.sameBlockCoords(.{ .x = player.position.x, .y = player.position.y + 1, .z = player.position.z }, position_center))) {
             std.log.warn("Cannot place block at ({}, {}, {}) because it is blocked by player", .{ position.x, position.y, position.z });
             valid = false;
         }
@@ -178,9 +176,8 @@ pub const Game = struct {
                 .z = player.position.z + std.math.cos(player.look[0] / 180.0 * std.math.pi) * 2,
             },
             .stack = .{
-                .id = stack.id,
+                .item = stack.item,
                 .count = if (drop_stack) stack.count else 1,
-                .damage = stack.damage,
                 .nbt = stack.nbt,
             },
         };
@@ -232,26 +229,34 @@ pub const Game = struct {
             defer gpa.free(message_json);
             try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
         } else if (std.mem.startsWith(u8, message, "/give")) {
-            var parts = std.mem.splitScalar(u8, message, ' ');
+            var parts = std.mem.splitAny(u8, message, " .");
             _ = parts.next(); // skip command part
             const id_str = parts.next();
+            const meta_str = parts.next();
             const amount_str = parts.next();
-            if (id_str == null or amount_str == null) {
-                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Invalid format, expected \\\"/give <id> <amount>\\\"\"}}", .{});
+            if (id_str == null or meta_str == null or amount_str == null) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Invalid format, expected \\\"/give <id>.<meta> <amount>\\\"\"}}", .{});
                 defer gpa.free(message_json);
                 try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
                 return;
             }
             const id = std.fmt.parseInt(i32, id_str.?, 10) catch -1;
-            if (id < 0) {
+            if (id < 0 or id > std.math.maxInt(u16)) {
                 const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Invalid id: {s}\"}}", .{id_str.?});
                 defer gpa.free(message_json);
                 try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
                 return;
             }
-            const item = std.enums.fromInt(ids.Item, id);
+            const meta = std.fmt.parseInt(i32, meta_str.?, 10) catch -1;
+            if (meta < 0 or meta > std.math.maxInt(u16)) {
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Invalid meta: {s}\"}}", .{meta_str.?});
+                defer gpa.free(message_json);
+                try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
+                return;
+            }
+            const item = std.enums.fromInt(palette.Item, palette.item(@intCast(id), @intCast(meta)));
             if (item == null) {
-                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Unknown item: {d}\"}}", .{id});
+                const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Unknown item: {d}.{d}\"}}", .{ id, meta });
                 defer gpa.free(message_json);
                 try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
                 return;
@@ -271,13 +276,12 @@ pub const Game = struct {
             }
 
             player.inventory.addStack(.{
-                .id = item.?,
+                .item = item.?,
                 .count = @intCast(amount),
-                .damage = 0,
                 .nbt = &[_]u8{0},
             }) catch |err| {
                 if (err == error.InventoryFull) {
-                    const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Inventory full, cannot give item {d} x {d}\"}}", .{ id, amount });
+                    const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Inventory full, cannot give item {d}.{d} x {d}\"}}", .{ id, meta, amount });
                     defer gpa.free(message_json);
                     try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
                 } else {
@@ -285,15 +289,15 @@ pub const Game = struct {
                 }
             };
             try self.sendInventory(gpa, tcp_writer, state, player);
-            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Gave item {d} ({}) x {d}\"}}", .{ id, item.?, amount });
+            const message_json = try std.fmt.allocPrint(gpa, "{{\"text\": \"Gave item {d}.{d} ({}) x {d}\"}}", .{ id, meta, item.?, amount });
             defer gpa.free(message_json);
             try self.sendMessage(gpa, tcp_writer, state, message_json, 1);
         } else if (std.mem.startsWith(u8, message, "/items")) {
             var items = std.ArrayList([]const u8).empty;
             defer items.deinit(gpa);
-            for (std.enums.values(ids.Item)) |item| {
-                if (item == ids.Item.Empty) continue;
-                const item_str = try std.fmt.allocPrint(gpa, "{}: {}", .{ @intFromEnum(item), item });
+            for (std.enums.values(palette.Item)) |item| {
+                if (item == palette.Item.empty) continue;
+                const item_str = try std.fmt.allocPrint(gpa, "{}.{}: {}", .{ item.id(), item.meta(), item });
                 try items.append(gpa, item_str);
             }
             const items_joined = try std.mem.join(gpa, "\n", items.items);

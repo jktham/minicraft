@@ -3,7 +3,6 @@ const std = @import("std");
 const _game = @import("game.zig");
 const data = @import("data.zig");
 const entities = @import("entities.zig");
-const ids = @import("ids.zig");
 const inventory = @import("inventory.zig");
 const utils = @import("utils.zig");
 const world = @import("world.zig");

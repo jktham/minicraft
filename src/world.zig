@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const data = @import("data.zig");
-const ids = @import("ids.zig");
+const palette = @import("palette.zig");
 
 pub const N_CHUNKS = 9; // number of chunks in each direction (x and z)
 pub const N_SUBCHUNKS = 16; // number of subchunks per column (y direction)
@@ -9,7 +9,7 @@ pub const N_BLOCKS = 16; // number of blocks in each direction within a subchunk
 
 pub const World = struct {
     /// chunk xzy, local yzx
-    chunks: [N_CHUNKS][N_CHUNKS][N_SUBCHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]u13,
+    chunks: [N_CHUNKS][N_CHUNKS][N_SUBCHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]palette.Block,
 
     pub fn init() World {
         return .{
@@ -40,15 +40,19 @@ pub const World = struct {
                                 const height: i32 = @intFromFloat(p * height_scale + height_offset);
 
                                 if (global_y == height) {
-                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Grass);
+                                    try self.setBlock(global_x, global_y, global_z, palette.Block.grass);
                                 } else if (global_y == height - 1) {
-                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Dirt);
+                                    try self.setBlock(global_x, global_y, global_z, palette.Block.dirt);
                                 } else if (global_y == 0) {
-                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Bedrock);
+                                    try self.setBlock(global_x, global_y, global_z, palette.Block.bedrock);
                                 } else if (global_y < height) {
-                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Stone);
+                                    try self.setBlock(global_x, global_y, global_z, palette.Block.stone);
                                 } else {
-                                    try self.setBlock(global_x, global_y, global_z, ids.Block.Air);
+                                    try self.setBlock(global_x, global_y, global_z, palette.Block.air);
+                                }
+
+                                if (global_y < 60 and std.meta.eql(try self.getBlock(global_x, global_y, global_z), palette.Block.air)) {
+                                    try self.setBlock(global_x, global_y, global_z, palette.Block.water);
                                 }
                             }
                         }
@@ -58,7 +62,7 @@ pub const World = struct {
         }
     }
 
-    pub fn setBlock(self: *World, x: i32, y: i32, z: i32, block: ids.Block) !void {
+    pub fn setBlock(self: *World, x: i32, y: i32, z: i32, block: palette.Block) !void {
         if (!checkBounds(x, y, z)) {
             return error.OutOfBounds;
         }
@@ -71,10 +75,10 @@ pub const World = struct {
         const local_y = @mod(y, 16);
         const local_z = @mod(z, 16);
 
-        self.chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)][@intCast(local_y)][@intCast(local_z)][@intCast(local_x)] = @intFromEnum(block);
+        self.chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)][@intCast(local_y)][@intCast(local_z)][@intCast(local_x)] = block;
     }
 
-    pub fn getBlock(self: *World, x: i32, y: i32, z: i32) !ids.Block {
+    pub fn getBlock(self: *World, x: i32, y: i32, z: i32) !palette.Block {
         if (!checkBounds(x, y, z)) {
             return error.OutOfBounds;
         }
@@ -87,7 +91,7 @@ pub const World = struct {
         const local_y = @mod(y, 16);
         const local_z = @mod(z, 16);
 
-        return @enumFromInt(self.chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)][@intCast(local_y)][@intCast(local_z)][@intCast(local_x)]);
+        return self.chunks[@intCast(chunk_x)][@intCast(chunk_z)][@intCast(chunk_y)][@intCast(local_y)][@intCast(local_z)][@intCast(local_x)];
     }
 
     /// pointer to flat array of 4096 blocks in the subchunk, for direct writing to network buffer in local yzx order

@@ -9,7 +9,7 @@ pub fn distance(a: entities.fPos, b: entities.fPos) f64 {
     return std.math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-pub fn sameBlock(a: entities.fPos, b: entities.fPos) bool {
+pub fn sameBlockCoords(a: entities.fPos, b: entities.fPos) bool {
     return @floor(a.x) == @floor(b.x) and @floor(a.y) == @floor(b.y) and @floor(a.z) == @floor(b.z);
 }
 

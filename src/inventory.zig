@@ -1,12 +1,11 @@
 const std = @import("std");
 
-const ids = @import("ids.zig");
+const palette = @import("palette.zig");
 const world = @import("world.zig");
 
 pub const Stack = struct {
-    id: ids.Item, // https://minecraft.fandom.com/wiki/Java_Edition_data_values/Pre-flattening
+    item: palette.Item,
     count: u8,
-    damage: i16,
     nbt: []const u8, // {0} for empty
 };
 
@@ -19,7 +18,7 @@ pub const Inventory = struct {
 
     pub fn init() Inventory {
         return .{
-            .slots = [_]Stack{.{ .id = .Empty, .count = 0, .damage = 0, .nbt = &[_]u8{0} }} ** N_SLOTS,
+            .slots = [_]Stack{.{ .item = palette.Item.empty, .count = 0, .nbt = &[_]u8{0} }} ** N_SLOTS,
             .changed = [_]bool{false} ** N_SLOTS,
         };
     }
@@ -28,7 +27,7 @@ pub const Inventory = struct {
     pub fn addStack(self: *Inventory, stack: Stack) !void {
         var count = stack.count;
         for (&self.slots, 0..N_SLOTS) |*slot, i| { // existing stacks
-            if (slot.id == stack.id and slot.damage == stack.damage and std.mem.eql(u8, slot.nbt, stack.nbt)) {
+            if (slot.item == stack.item and std.mem.eql(u8, slot.nbt, stack.nbt)) {
                 const new_count = slot.count + count;
                 if (new_count > MAX_STACK) {
                     slot.count = MAX_STACK;
@@ -42,11 +41,10 @@ pub const Inventory = struct {
             }
         }
         for (36..45) |i| { // hotbar first
-            if (self.slots[i].id == .Empty) {
+            if (self.slots[i].count == 0) {
                 self.slots[i] = .{
-                    .id = stack.id,
+                    .item = stack.item,
                     .count = count,
-                    .damage = stack.damage,
                     .nbt = stack.nbt,
                 };
                 self.changed[i] = true;
@@ -54,11 +52,10 @@ pub const Inventory = struct {
             }
         }
         for (0..46) |i| { // main inventory
-            if (self.slots[i].id == .Empty) {
+            if (self.slots[i].count == 0) {
                 self.slots[i] = .{
-                    .id = stack.id,
+                    .item = stack.item,
                     .count = count,
-                    .damage = stack.damage,
                     .nbt = stack.nbt,
                 };
                 self.changed[i] = true;
@@ -77,8 +74,7 @@ pub const Inventory = struct {
             slot.count -= count;
         } else {
             slot.count = 0;
-            slot.id = .Empty;
-            slot.damage = 0;
+            slot.item = palette.Item.empty;
             slot.nbt = &[_]u8{0};
         }
         self.changed[index] = true;
