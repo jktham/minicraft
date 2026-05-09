@@ -25,7 +25,8 @@ pub fn startServer(io: std.Io, gpa: std.mem.Allocator) !void {
     });
     defer server.deinit(io);
 
-    var game = _game.Game.init();
+    var game = _game.Game.init(gpa);
+    defer game.deinit(gpa);
     try game.world.generate();
 
     std.log.info("Listening on {f}", .{server.socket.address});

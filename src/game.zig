@@ -15,13 +15,19 @@ pub const Game = struct {
     entities: entities.Entities,
     time: i64, // world time in ticks (20 ticks per second)
 
-    pub fn init() Game {
+    pub fn init(gpa: std.mem.Allocator) Game {
         return .{
             .players = std.ArrayList(_player.Player).empty,
-            .world = world.World.init(),
+            .world = world.World.init(gpa),
             .entities = entities.Entities.init(),
             .time = 0,
         };
+    }
+
+    pub fn deinit(self: *Game, gpa: std.mem.Allocator) void {
+        self.world.deinit(gpa);
+        self.entities.items.deinit(gpa);
+        self.players.deinit(gpa);
     }
 
     /// populate player fields, check if rejoining by comparing name
@@ -356,7 +362,7 @@ pub const Game = struct {
 
         // pick up nearby items
         for (self.players.items) |*player| {
-            const close_items = try self.entities.getCloseItems(gpa, .{ .x = player.position.x, .y = player.position.y + 1.0, .z = player.position.z }, 1.2);
+            const close_items = try self.entities.getCloseItems(gpa, .{ .x = player.position.x, .y = player.position.y + 0.5, .z = player.position.z }, 1.2);
             for (close_items) |item| {
                 player.inventory.addStack(item.stack) catch |err| {
                     if (err == error.InventoryFull) {

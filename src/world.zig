@@ -1,24 +1,30 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const data = @import("data.zig");
 const palette = @import("palette.zig");
 
-pub const N_CHUNKS = 9; // number of chunks in each direction (x and z)
+pub const N_CHUNKS = if (builtin.mode == .Debug) 9 else 21; // number of chunks in each direction (x and z)
 pub const N_SUBCHUNKS = 16; // number of subchunks per column (y direction)
 pub const N_BLOCKS = 16; // number of blocks in each direction within a subchunk
 
 pub const World = struct {
     /// chunk xzy, local yzx
-    chunks: [N_CHUNKS][N_CHUNKS][N_SUBCHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]palette.Block,
+    chunks: *[N_CHUNKS][N_CHUNKS][N_SUBCHUNKS][N_BLOCKS][N_BLOCKS][N_BLOCKS]palette.Block,
 
-    pub fn init() World {
+    pub fn init(gpa: std.mem.Allocator) World {
         return .{
-            .chunks = undefined,
+            .chunks = @ptrCast(gpa.alloc(palette.Block, N_CHUNKS * N_CHUNKS * N_SUBCHUNKS * N_BLOCKS * N_BLOCKS * N_BLOCKS) catch unreachable),
         };
+    }
+
+    pub fn deinit(self: *World, gpa: std.mem.Allocator) void {
+        gpa.free(@as([]palette.Block, @ptrCast(self.chunks)));
     }
 
     pub fn generate(self: *World) !void {
         std.log.info("Generating world...", .{});
+        var count: i32 = 0;
         for (0..N_CHUNKS) |chunk_x| {
             for (0..N_CHUNKS) |chunk_z| {
                 for (0..N_SUBCHUNKS) |chunk_y| {
@@ -57,9 +63,12 @@ pub const World = struct {
                             }
                         }
                     }
+                    count += 1;
+                    std.log.info("Chunk {d}/{d}\x1B[A", .{ count, N_CHUNKS * N_CHUNKS * N_SUBCHUNKS });
                 }
             }
         }
+        std.log.info("Chunk {d}/{d}", .{ count, N_CHUNKS * N_CHUNKS * N_SUBCHUNKS });
     }
 
     pub fn setBlock(self: *World, x: i32, y: i32, z: i32, block: palette.Block) !void {
