@@ -64,7 +64,7 @@ pub const Game = struct {
     /// validate and break block, then update client
     pub fn breakBlock(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, player: *_player.Player, position: data.Position) !void {
         const block = try self.world.getBlock(@intCast(position.x), @intCast(position.y), @intCast(position.z));
-        if (!block.mineable()) {
+        if (!block.solid()) {
             std.log.warn("Cannot break block at ({}, {}, {}) because {} is not breakable", .{ position.x, position.y, position.z, block });
             try self.sendBlockChange(gpa, tcp_writer, state, position); // sync client
             return;
@@ -81,6 +81,11 @@ pub const Game = struct {
                 .x = @as(f32, @floatFromInt(position.x)) + 0.5,
                 .y = @as(f32, @floatFromInt(position.y)) + 0.5,
                 .z = @as(f32, @floatFromInt(position.z)) + 0.5,
+            },
+            .velocity = .{
+                .x = 0.0,
+                .y = 0.0,
+                .z = 0.0,
             },
             .stack = .{
                 .item = block.mine(),
@@ -174,6 +179,11 @@ pub const Game = struct {
                 .x = player.position.x - std.math.sin(player.look[0] / 180.0 * std.math.pi) * 2,
                 .y = player.position.y + 0.5,
                 .z = player.position.z + std.math.cos(player.look[0] / 180.0 * std.math.pi) * 2,
+            },
+            .velocity = .{
+                .x = 0.0,
+                .y = 0.0,
+                .z = 0.0,
             },
             .stack = .{
                 .item = stack.item,
@@ -314,7 +324,6 @@ pub const Game = struct {
 
     /// main game loop, called every tick to update game state and send updates to client. delta is time in ms since last tick
     pub fn tick(self: *Game, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer, state: *server.State, delta: i64) !void {
-        _ = delta; // autofix
         var res_data: [1000]u8 = undefined;
         var w = std.Io.Writer.fixed(&res_data);
         const res_writer = &w;
@@ -328,6 +337,21 @@ pub const Game = struct {
             try data.writeLong(res_writer, @mod(self.time, 24000)); // time of day in ticks (0-23999)
             try server.sendPacket(gpa, tcp_writer, .{ .id = 0x47, .data = res_writer.buffered() }, state.*);
             _ = res_writer.consumeAll();
+        }
+
+        // item gravity
+        const dt: f64 = @as(f64, @floatFromInt(delta)) / 1000.0;
+        for (self.entities.items.items) |*item| {
+            const block_below = try self.world.getBlock(@floor(item.position.x), @floor(item.position.y - 1), @floor(item.position.z));
+            if (block_below.solid()) {
+                item.position.y = @as(f64, @floor(item.position.y - 1)) + 1.05; // snap to block surface
+                item.velocity.y = 0.0;
+            } else { // TODO: check entire path, fast falling entities can clip through blocks
+                item.velocity.y -= 9.81 * dt; // gravity
+                item.position.x += item.velocity.x * dt;
+                item.position.y += item.velocity.y * dt;
+                item.position.z += item.velocity.z * dt;
+            }
         }
 
         // pick up nearby items
@@ -430,9 +454,9 @@ pub const Game = struct {
             try data.writeByte(res_writer, 0); // pitch
             try data.writeByte(res_writer, 0); // yaw
             try data.writeInt(res_writer, 1); // data
-            try data.writeShort(res_writer, 0); // velocity x
-            try data.writeShort(res_writer, 0); // velocity y
-            try data.writeShort(res_writer, 0); // velocity z
+            try data.writeShort(res_writer, @as(i16, @floor(item.velocity.x * 8000 / 20))); // velocity x (1/8000 blocks per tick)
+            try data.writeShort(res_writer, @as(i16, @floor(item.velocity.y * 8000 / 20))); // velocity y (1/8000 blocks per tick)
+            try data.writeShort(res_writer, @as(i16, @floor(item.velocity.z * 8000 / 20))); // velocity z (1/8000 blocks per tick)
             try server.sendPacket(gpa, tcp_writer, .{ .id = 0x00, .data = res_writer.buffered() }, state.*);
             _ = res_writer.consumeAll();
 

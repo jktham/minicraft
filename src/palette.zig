@@ -76,8 +76,8 @@ pub const Block = enum(u13) {
         };
     }
 
-    /// whether the block can be interacted with via mining
-    pub fn mineable(self: Block) bool {
+    /// whether the block can be collided with, and mined
+    pub fn solid(self: Block) bool {
         return switch (self) {
             .air, .water, .water_stationary, .lava, .lava_stationary => false,
             else => true,

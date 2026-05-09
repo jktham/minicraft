@@ -14,6 +14,7 @@ pub const ItemEntity = struct {
     eid: i32,
     uuid: u128,
     position: fPos,
+    velocity: fPos, // blocks per second
     stack: inventory.Stack,
 };
 
@@ -37,7 +38,7 @@ pub const Entities = struct {
     }
 
     pub fn spawnItem(self: *Entities, gpa: std.mem.Allocator, item: ItemEntity) !void {
-        std.log.info("Spawning item entity with eid 0x{x}, uuid 0x{x}, position ({}, {}, {}), stack {}", .{ item.eid, item.uuid, item.position.x, item.position.y, item.position.z, item.stack });
+        std.log.info("Spawning item entity with eid 0x{x}, uuid 0x{x}, position ({}, {}, {}), velocity ({}, {}, {}), stack {}", .{ item.eid, item.uuid, item.position.x, item.position.y, item.position.z, item.velocity.x, item.velocity.y, item.velocity.z, item.stack });
         try self.items.append(gpa, item);
     }
 
