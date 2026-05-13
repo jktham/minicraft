@@ -345,6 +345,20 @@ pub const Game = struct {
             _ = res_writer.consumeAll();
         }
 
+        // special player interactions
+        for (self.players.items) |*player| {
+            const block_below = try self.world.getBlock(@floor(player.position.x), @floor(player.position.y - 1), @floor(player.position.z));
+            if (block_below == palette.Block.emerald_block and player.on_ground) {
+                // update velocity
+                try data.writeVarInt(res_writer, player.eid); // entity id
+                try data.writeShort(res_writer, utils.encodeVelocity(0.0)); // velocity x
+                try data.writeShort(res_writer, utils.encodeVelocity(30.0)); // velocity y
+                try data.writeShort(res_writer, utils.encodeVelocity(0.0)); // velocity z
+                try server.sendPacket(gpa, tcp_writer, .{ .id = 0x3e, .data = res_writer.buffered() }, state.*);
+                _ = res_writer.consumeAll();
+            }
+        }
+
         // item gravity
         const dt: f64 = @as(f64, @floatFromInt(delta)) / 1000.0;
         for (self.entities.items.items) |*item| {
@@ -460,9 +474,9 @@ pub const Game = struct {
             try data.writeByte(res_writer, 0); // pitch
             try data.writeByte(res_writer, 0); // yaw
             try data.writeInt(res_writer, 1); // data
-            try data.writeShort(res_writer, @as(i16, @floor(item.velocity.x * 8000 / 20))); // velocity x (1/8000 blocks per tick)
-            try data.writeShort(res_writer, @as(i16, @floor(item.velocity.y * 8000 / 20))); // velocity y (1/8000 blocks per tick)
-            try data.writeShort(res_writer, @as(i16, @floor(item.velocity.z * 8000 / 20))); // velocity z (1/8000 blocks per tick)
+            try data.writeShort(res_writer, utils.encodeVelocity(item.velocity.x)); // velocity x (1/8000 blocks per tick)
+            try data.writeShort(res_writer, utils.encodeVelocity(item.velocity.y));
+            try data.writeShort(res_writer, utils.encodeVelocity(item.velocity.z));
             try server.sendPacket(gpa, tcp_writer, .{ .id = 0x00, .data = res_writer.buffered() }, state.*);
             _ = res_writer.consumeAll();
 

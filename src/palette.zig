@@ -40,6 +40,7 @@ pub const Block = enum(u13) {
     coal_ore = block(16, 0),
     wood = block(17, 0),
     leaves = block(18, 0),
+    emerald_block = block(133, 0),
 
     err = block(213, 0),
 
@@ -130,6 +131,7 @@ pub const Item = enum(u32) {
     coal_ore = item(16, 0),
     wood = item(17, 0),
     leaves = item(18, 0),
+    emerald_block = item(133, 0),
 
     iron_shovel = item(256, 0),
     iron_pickaxe = item(257, 0),

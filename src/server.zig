@@ -210,6 +210,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         std.log.info("Got position_update: position ({}, {}, {}), on_ground {}", .{ x, y, z, on_ground });
 
         game.players.items[p].position = entities.fPos{ .x = x, .y = y, .z = z };
+        game.players.items[p].on_ground = on_ground;
     } else if (state.* == State.Play and packet.id == 0x0e) {
         // position and look update
         const x = try data.readDouble(req_reader);
@@ -222,6 +223,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
 
         game.players.items[p].position = entities.fPos{ .x = x, .y = y, .z = z };
         game.players.items[p].look = [2]f32{ yaw, pitch };
+        game.players.items[p].on_ground = on_ground;
     } else if (state.* == State.Play and packet.id == 0x0f) {
         // look update
         const yaw = try data.readFloat(req_reader);
@@ -230,6 +232,7 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         std.log.info("Got look_update: yaw {}, pitch {}, on_ground {}", .{ yaw, pitch, on_ground });
 
         game.players.items[p].look = [2]f32{ yaw, pitch };
+        game.players.items[p].on_ground = on_ground;
     } else if (state.* == State.Play and packet.id == 0x00) {
         // teleport confirm
         const teleport_id = try data.readVarInt(req_reader);
@@ -272,15 +275,6 @@ fn updateNetwork(io: std.Io, gpa: std.mem.Allocator, tcp_writer: *std.Io.Writer,
         // player animation
         const hand = try data.readVarInt(req_reader);
         std.log.info("Got player_animation: hand {}", .{hand});
-
-        // // jump
-        // try io.writeVarInt(res_writer, player.eid); // entity id
-        // try io.writeShort(res_writer, 0); // velocity x
-        // try io.writeShort(res_writer, 10000); // velocity y
-        // try io.writeShort(res_writer, 0); // velocity z
-        // try io.writePacket(tcp_writer, 0x3e, res_writer.buffered());
-        // _ = res_writer.consumeAll();
-
     } else if (state.* == State.Play and packet.id == 0x1a) {
         // player slot selection
         const slot = try data.readShort(req_reader);

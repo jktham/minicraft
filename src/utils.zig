@@ -30,3 +30,15 @@ pub fn sanitizeString(gpa: std.mem.Allocator, str: []const u8) ![]const u8 {
     }
     return sanitized;
 }
+
+/// convert blocks per second to 1/8000 of a block per tick
+pub fn encodeVelocity(vel: f64) i16 {
+    const i = @as(i64, @floor(vel * 8000 / 20));
+    if (i < std.math.minInt(i16)) {
+        return std.math.minInt(i16);
+    } else if (i > std.math.maxInt(i16)) {
+        return std.math.maxInt(i16);
+    } else {
+        return @truncate(i);
+    }
+}
